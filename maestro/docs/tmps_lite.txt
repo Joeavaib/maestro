@@ -1,0 +1,626 @@
+TMP-S Lite v1.0 – Hybrid Edition
+Die Synthese: Lite-Format + Hybrid-Architektur
+
+Du hast jetzt zwei Erkenntnisse, die perfekt zusammenpassen:
+
+    Lite v1.0: Reduziertes Format, das 12–14B Modelle zuverlässig produzieren können
+    Hybrid-Ansatz: LLM macht Semantik, Rules machen Deterministik
+
+Zusammen ergibt das die optimale Architektur:
+
+text
+
+┌──────────────────────────────────────────────────────────┐
+│              TMP-S Lite v1.0 – Hybrid Edition            │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  ┌────────────────────────────────────────┐              │
+│  │  LLM (3B–14B, Fine-Tuned)             │              │
+│  │                                        │              │
+│  │  Input:  Specialist-Output + Context   │              │
+│  │  Output: TMP-S Lite Record             │              │
+│  │                                        │              │
+│  │  A ok|score|rationale     ◄── urteilen │              │
+│  │  E location|fix           ◄── finden   │              │
+│  │  B agent|action           ◄── planen   │              │
+│  │  C decision|focus         ◄── routen   │              │
+│  └──────────────┬─────────────────────────┘              │
+│                 │ Lite Record (4 Zeilentypen, ~6 Felder) │
+│                 ▼                                        │
+│  ┌────────────────────────────────────────┐              │
+│  │  Orchestrator + Rule Engine            │              │
+│  │                                        │              │
+│  │  1. Toleranter Parser (repariert)      │              │
+│  │  2. derive_verdict(ok, score)          │              │
+│  │  3. normalize(verdict, decision, budget)│             │
+│  │  4. derive_strategy(score, turn, ...)  │              │
+│  │  5. Budget-Tracking (budget -= 1)      │              │
+│  │  6. V-Zeile injizieren (sid/runid/turn)│              │
+│  │  7. Severity ableiten aus ok+score     │              │
+│  │  8. Implicit Reroute Detection         │              │
+│  │  9. Optional: Upcast zu v2.4 Record    │              │
+│  └──────────────┬─────────────────────────┘              │
+│                 │                                        │
+│                 ▼                                        │
+│  ┌────────────────────────────────────────┐              │
+│  │  Vollständiger v2.4 Record (intern)    │              │
+│  │  V 2.4|sess-a1|run-12|0               │              │
+│  │  A 1111|8897|P|Lösung korrekt         │              │
+│  │  B 1:fmt|Output formatieren            │              │
+│  │  C A|0|0|*                             │              │
+│  └────────────────────────────────────────┘              │
+└──────────────────────────────────────────────────────────┘
+
+Was das LLM sieht vs. was intern passiert
+LLM-Perspektive (einfach)
+
+text
+
+Input:  "Bewerte diesen Output..."
+Output: 4 Zeilen, ~6 Felder, Freitext erlaubt
+
+Orchestrator-Perspektive (vollständig)
+
+text
+
+Input:  Lite Record (4 Zeilen)
+Output: Vollständiger v2.4 State mit allen 17+ Feldern
+
+Das Beste aus beiden Welten
+
+text
+
+LLM-Last:        Lite (leicht, zuverlässig)
+System-Fähigkeit: v2.4 (vollständig, deterministisch)
+
+Vollständige Referenz-Implementierung
+1. Der Orchestrator (Komplett)
+
+Python
+
+from dataclasses import dataclass, field
+from typing import Optional
+import re
+import uuid
+
+
+# ─── Data Structures ────────────────────────────────
+
+@dataclass
+class Error:
+    location: str
+    fix: str
+    severity: str = ""        # Orchestrator-enriched
+    turn_ref: int = -1        # Orchestrator-enriched
+
+@dataclass
+class Step:
+    agent: str
+    action: str
+    priority: int = 0         # Orchestrator-enriched
+
+@dataclass
+class LiteRecord:
+    """Was das LLM ausgibt"""
+    ok: int = 1
+    score: int = 5
+    rationale: str = ""
+    errors: list[Error] = field(default_factory=list)
+    briefing: list[Step] = field(default_factory=list)
+    decision: str = "R"
+    focus: str = "*"
+    raw: str = ""
+
+@dataclass
+class FullRecord:
+    """Vollständiger v2.4 Record (intern)"""
+    # V-Zeile
+    ver: str = "2.4"
+    sid: str = ""
+    runid: str = ""
+    turn: int = 0
+    
+    # A-Zeile
+    hard4: str = "1111"
+    soft4: str = "5555"
+    verdict: str = "W"
+    rationale: str = ""
+    
+    # E-Zeilen
+    errors: list[Error] = field(default_factory=list)
+    
+    # B-Zeilen
+    briefing: list[Step] = field(default_factory=list)
+    
+    # C-Zeile
+    decision: str = "R"
+    strategy: int = 1
+    max_retries: int = 0
+    focus: str = "*"
+    
+    def to_tmps(self) -> str:
+        """Serialize zu v2.4 TMP-S String"""
+        lines = []
+        lines.append(f"V {self.ver}|{self.sid}|{self.runid}|{self.turn}")
+        lines.append(
+            f"A {self.hard4}|{self.soft4}|{self.verdict}"
+            f"|{self.rationale}"
+        )
+        for e in self.errors:
+            line = f"E {e.location}|{e.severity}|{e.fix}"
+            if e.turn_ref >= 0:
+                line += f"|{e.turn_ref}"
+            lines.append(line)
+        for s in self.briefing:
+            lines.append(f"B {s.priority}:{s.agent}|{s.action}")
+        lines.append(
+            f"C {self.decision}|{self.strategy}"
+            f"|{self.max_retries}|{self.focus}"
+        )
+        return "\n".join(lines)
+
+
+# ─── Toleranter Parser ──────────────────────────────
+
+class LiteParser:
+    """
+    Parst TMP-S Lite Records.
+    Toleriert Leerzeichen, fehlende Felder, 
+    falsche Reihenfolge.
+    """
+    
+    def parse(self, raw: str) -> LiteRecord:
+        rec = LiteRecord(raw=raw)
+        
+        for line in raw.strip().splitlines():
+            line = line.strip()
+            if not line or len(line) < 3:
+                continue
+            
+            tag = line[0].upper()
+            rest = line[2:].strip() if len(line) > 2 else ""
+            parts = [p.strip() for p in rest.split("|")]
+            
+            if tag == "A":
+                self._parse_a(parts, rec)
+            elif tag == "E":
+                self._parse_e(parts, rec)
+            elif tag == "B":
+                self._parse_b(parts, rec)
+            elif tag == "C":
+                self._parse_c(parts, rec)
+        
+        self._apply_defaults(rec)
+        return rec
+    
+    def _parse_a(self, parts: list[str], rec: LiteRecord):
+        if len(parts) >= 1:
+            rec.ok = int(parts[0]) if parts[0] in ("0", "1") else 1
+        if len(parts) >= 2:
+            rec.score = int(parts[1]) if parts[1].isdigit() else 5
+        if len(parts) >= 3:
+            rec.rationale = parts[2][:80]  # Hard limit
+    
+    def _parse_e(self, parts: list[str], rec: LiteRecord):
+        if len(rec.errors) >= 3:  # Max 3
+            return
+        location = parts[0][:30] if len(parts) >= 1 else "unknown"
+        fix = parts[1][:60] if len(parts) >= 2 else "Fehler beheben"
+        rec.errors.append(Error(location=location, fix=fix))
+    
+    def _parse_b(self, parts: list[str], rec: LiteRecord):
+        if len(rec.briefing) >= 3:  # Max 3
+            return
+        agent = parts[0][:4].lower() if len(parts) >= 1 else "orch"
+        # Validate agent format
+        agent = re.sub(r'[^a-z]', '', agent)[:4] or "orch"
+        action = parts[1][:80] if len(parts) >= 2 else "Nächsten Schritt ausführen"
+        rec.briefing.append(Step(agent=agent, action=action))
+    
+    def _parse_c(self, parts: list[str], rec: LiteRecord):
+        if len(parts) >= 1:
+            d = parts[0].upper()
+            rec.decision = d if d in ("A", "R", "E") else "R"
+        if len(parts) >= 2:
+            rec.focus = parts[1][:30] if parts[1] else "*"
+    
+    def _apply_defaults(self, rec: LiteRecord):
+        if not rec.briefing:
+            rec.briefing = [Step(agent="orch", action="Nächsten Schritt bestimmen")]
+        if not rec.rationale:
+            rec.rationale = "Keine Begründung"
+        # Wenn kein C geparst wurde, leite decision ab
+        if not hasattr(rec, '_c_parsed'):
+            if rec.score >= 7 and rec.ok == 1:
+                rec.decision = "A"
+            elif rec.score < 4 or rec.ok == 0:
+                rec.decision = "R"
+
+
+# ─── Rule Engine ─────────────────────────────────────
+
+class RuleEngine:
+    """
+    Alle deterministischen Ableitungen.
+    Kein ML, kein LLM, pure Logik.
+    """
+    
+    # ── Verdict ──
+    @staticmethod
+    def derive_verdict(ok: int, score: int) -> str:
+        if ok == 0:
+            return "H"
+        if score >= 7:
+            return "P"
+        if score >= 4:
+            return "W"
+        return "F"
+    
+    # ── Decision Normalisierung ──
+    @staticmethod
+    def normalize_decision(
+        verdict: str, 
+        decision: str, 
+        budget: int
+    ) -> str:
+        # Pass/Warn → Accept
+        if verdict == "P" and decision != "A":
+            decision = "A"
+        
+        # Fail/Hard bei Accept → korrigieren
+        if verdict in ("F", "H") and decision == "A":
+            decision = "R" if budget > 0 else "E"
+        
+        # Kein Budget → Escalate
+        if decision == "R" and budget <= 0:
+            decision = "E"
+        
+        return decision
+    
+    # ── Strategy ──
+    @staticmethod
+    def derive_strategy(
+        score: int, 
+        turn: int, 
+        n_errors: int, 
+        budget: int
+    ) -> int:
+        if score >= 7:
+            return 0       # none (accept)
+        if n_errors <= 1 and turn < 2:
+            return 1       # targeted
+        if turn == 0:
+            return 2       # full retry
+        if n_errors >= 3:
+            return 3       # decompose
+        if budget <= 1:
+            return 5       # fallback_min
+        return 4           # fallback
+    
+    # ── Severity ──
+    @staticmethod
+    def derive_severity(ok: int, score: int, error_index: int) -> str:
+        if ok == 0 and error_index == 0:
+            return "C"     # Critical
+        if score <= 3:
+            return "H"     # High
+        if score <= 6:
+            return "M"     # Medium
+        return "L"         # Low
+    
+    # ── Hard4 Expansion ──
+    @staticmethod
+    def expand_hard4(ok: int) -> str:
+        """
+        Lite hat nur 1 Bit. Für v2.4 Kompatibilität
+        expandieren wir konservativ.
+        """
+        if ok == 1:
+            return "1111"
+        return "0111"  # Konservativ: Schema-Fail als Default
+    
+    # ── Soft4 Expansion ──
+    @staticmethod
+    def expand_soft4(score: int) -> str:
+        """
+        1 Score → 4 Dimensionen.
+        Spread: Hauptwert ± 1, begrenzt auf 0–9.
+        """
+        base = score
+        correctness = min(9, max(0, base))
+        adherence   = min(9, max(0, base))
+        completeness = min(9, max(0, base - 1))
+        clarity     = min(9, max(0, base + 1))
+        return f"{correctness}{adherence}{completeness}{clarity}"
+    
+    # ── Implicit Reroute Detection ──
+    @staticmethod
+    def detect_reroute(
+        current_agent: str, 
+        suggested_agent: str
+    ) -> bool:
+        return (
+            current_agent != suggested_agent 
+            and suggested_agent != "orch"
+        )
+
+
+# ─── Upcast: Lite → Full v2.4 Record ────────────────
+
+class RecordUpcast:
+    """Wandelt Lite Record + Orchestrator-State in Full v2.4 um."""
+    
+    def __init__(self, rules: RuleEngine):
+        self.rules = rules
+    
+    def upcast(
+        self, 
+        lite: LiteRecord, 
+        sid: str, 
+        runid: str, 
+        turn: int, 
+        budget: int,
+        current_agent: str = ""
+    ) -> FullRecord:
+        
+        verdict = self.rules.derive_verdict(lite.ok, lite.score)
+        decision = self.rules.normalize_decision(
+            verdict, lite.decision, budget
+        )
+        strategy = self.rules.derive_strategy(
+            lite.score, turn, len(lite.errors), budget
+        )
+        
+        # Reroute Detection
+        if (lite.briefing 
+            and self.rules.detect_reroute(
+                current_agent, lite.briefing[0].agent
+            )
+            and decision == "R"):
+            # Implizites Reroute → trotzdem intern als R behandeln,
+            # aber Agent wechselt
+            pass  # Orchestrator routet einfach zum neuen Agent
+        
+        # Errors anreichern
+        enriched_errors = []
+        for i, e in enumerate(lite.errors):
+            enriched_errors.append(Error(
+                location=e.location,
+                fix=e.fix,
+                severity=self.rules.derive_severity(
+                    lite.ok, lite.score, i
+                ),
+                turn_ref=turn if turn > 0 else -1
+            ))
+        
+        # Briefing anreichern
+        enriched_briefing = []
+        for i, s in enumerate(lite.briefing):
+            enriched_briefing.append(Step(
+                agent=s.agent,
+                action=s.action,
+                priority=i + 1
+            ))
+        
+        # Budget nach diesem Turn
+        remaining = budget - 1 if decision == "R" else (
+            budget if decision == "A" else 0
+        )
+        remaining = max(0, remaining)
+        
+        return FullRecord(
+            ver="2.4",
+            sid=sid,
+            runid=runid,
+            turn=turn,
+            hard4=self.rules.expand_hard4(lite.ok),
+            soft4=self.rules.expand_soft4(lite.score),
+            verdict=verdict,
+            rationale=lite.rationale,
+            errors=enriched_errors,
+            briefing=enriched_briefing,
+            decision=decision,
+            strategy=strategy,
+            max_retries=remaining,
+            focus=lite.focus
+        )
+
+
+# ─── Orchestrator ────────────────────────────────────
+
+@dataclass
+class OrchestratorConfig:
+    max_retries: int = 2
+    abs_max_turns: int = 5
+
+class OrchestratorLiteHybrid:
+    def __init__(self, config: OrchestratorConfig, specialists: dict, validator):
+        self.cfg = config
+        self.specialists = specialists
+        self.validator = validator  # Das Fine-Tuned LLM
+        self.parser = LiteParser()
+        self.rules = RuleEngine()
+        self.upcast = RecordUpcast(self.rules)
+        self.store = {}
+    
+    def handle_request(self, user_request: str) -> dict:
+        sid = f"s-{uuid.uuid4().hex[:8]}"
+        runid = f"r-{uuid.uuid4().hex[:6]}"
+        turn = 0
+        budget = self.cfg.max_retries
+        
+        # Initial routing
+        agent = self._route_initial(user_request)
+        output = self.specialists[agent].call(user_request)
+        
+        while turn <= self.cfg.abs_max_turns:
+            # ── LLM: Semantische Bewertung ──
+            validator_prompt = self._build_validator_prompt(
+                output, user_request, turn, budget
+            )
+            raw_lite = self.validator.generate(validator_prompt)
+            
+            # ── Parser: Tolerant parsen ──
+            lite = self.parser.parse(raw_lite)
+            
+            # ── Rules + Upcast: Vollständigen Record bauen ──
+            full = self.upcast.upcast(
+                lite, sid, runid, turn, budget, agent
+            )
+            
+            # ── Store ──
+            self._store_record(sid, runid, turn, full, output)
+            
+            # ── Decision Handling ──
+            if full.decision == "A":
+                self._merge(sid, output, full.focus)
+                return {
+                    "status": "accepted",
+                    "result": output,
+                    "record": full.to_tmps(),
+                    "turns": turn
+                }
+            
+            if full.decision == "E":
+                return {
+                    "status": "escalated",
+                    "record": full.to_tmps(),
+                    "turns": turn,
+                    "reason": full.rationale
+                }
+            
+            # ── Retry ──
+            new_agent = full.briefing[0].agent
+            
+            # Reroute Detection
+            if self.rules.detect_reroute(agent, new_agent):
+                agent = new_agent
+            
+            prompt = self._build_specialist_prompt(
+                agent, user_request, full, output
+            )
+            
+            budget -= 1
+            turn += 1
+            output = self.specialists[agent].call(prompt)
+        
+        # Absolute Turn-Limit erreicht
+        return {
+            "status": "escalated",
+            "reason": "abs_max_turns reached",
+            "turns": turn
+        }
+    
+    def _build_validator_prompt(
+        self, output, request, turn, budget
+    ) -> str:
+        return f"""[CONTEXT] turn={turn} | budget={budget}
+[REQUEST] {request}
+[OUTPUT] {output}
+
+Bewerte den Output im TMP-S Lite Format."""
+    
+    def _build_specialist_prompt(
+        self, agent, request, record: FullRecord, last_output
+    ) -> str:
+        # Strategy bestimmt Context-Profil
+        if record.strategy == 5:  # fallback_min
+            return f"""[SYSTEM] Du bist {agent}. Antworte NUR mit einem minimalen Patch.
+[CONTEXT] {request[:200]}
+[FEHLER] {record.errors[0].fix if record.errors else 'Korrigieren'}
+[FOKUS] {record.focus}
+Gib NUR den korrigierten Abschnitt aus."""
+        
+        elif record.strategy == 1:  # targeted
+            return f"""[SYSTEM] Du bist {agent}. Korrigiere NUR den Fehler.
+[CONTEXT] {request}
+[VALIDATOR] {record.rationale}
+[FOKUS] {record.focus}
+[FEHLER] {'; '.join(e.fix for e in record.errors)}
+[TASK] {record.briefing[0].action}"""
+        
+        else:  # full, decompose, fallback
+            return f"""[SYSTEM] Du bist {agent}. Löse die Aufgabe.
+[CONTEXT] {request}
+[VALIDATOR] {record.rationale}
+[BISHERIGE AUSGABE] {last_output}
+[TASK] {record.briefing[0].action}"""
+    
+    def _route_initial(self, request: str) -> str:
+        # Einfaches Keyword-Routing als Fallback
+        lower = request.lower()
+        if any(w in lower for w in ["berechne", "löse", "integral"]):
+            return "math"
+        if any(w in lower for w in ["code", "programmier", "funktion"]):
+            return "code"
+        return "gen"  # General
+    
+    def _merge(self, sid, output, focus):
+        if focus == "*":
+            self.store[sid] = {"result": output}
+        else:
+            if sid not in self.store:
+                self.store[sid] = {}
+            self.store[sid][focus] = output
+    
+    def _store_record(self, sid, runid, turn, record, output):
+        key = f"{sid}:{runid}:{turn}"
+        self.store[key] = {
+            "record": record.to_tmps(),
+            "output": output
+        }
+
+Training-Setup für den Hybrid-Ansatz
+Was sich ändert an den Trainingsdaten
+
+text
+
+VORHER (Pure LLM, TMP-S v2.4):
+─────────────────────────────────
+Output: 7+ Zeilen, 17+ Felder, alles korrekt
+
+JETZT (Hybrid, TMP-S Lite):
+─────────────────────────────────
+Output: 3–6 Zeilen, ~6 Felder, tolerant geparst
+
+Trainings-Samples
+
+JSON
+
+{
+  "instruction": "Bewerte den Specialist-Output im TMP-S Lite Format.",
+  
+  "input": "[CONTEXT] turn=0 | budget=2\n[REQUEST] Berechne die Ableitung von f(x)=x³+2x\n[OUTPUT] Die Ableitung ist f'(x) = 3x² + 2. Potenzregel angewandt.",
+  
+  "output": "A 1|8|Ableitung korrekt nach Potenzregel\nB fmt|Ergebnis formatieren\nC A|*"
+}
+
+JSON
+
+{
+  "instruction": "Bewerte den Specialist-Output im TMP-S Lite Format.",
+  
+  "input": "[CONTEXT] turn=0 | budget=2\n[REQUEST] Löse das ODE y'=y mit Euler\n[OUTPUT] Verwende Euler-Methode mit h=0.5 für steifes System...",
+  
+  "output": "A 0|4|Euler auf steifes ODE verletzt Stabilität\nE Methode|Euler durch RK4 oder implizit ersetzen\nE Ergebnis|Neuberechnung nach Methodenwechsel\nB math|Recompute mit RK4\nB veri|Numerische Stabilität prüfen\nC R|Methode"
+}
+
+JSON
+
+{
+  "instruction": "Bewerte den Specialist-Output im TMP-S Lite Format.",
+  
+  "input": "[CONTEXT] turn=2 | budget=0\n[REQUEST] Konvergenz-Analyse\n[OUTPUT] Immer noch divergent nach zwei Korrekturen...",
+  
+  "output": "A 1|3|Zwei Versuche ohne Konvergenz\nE Konvergenzkriterium|Anpassen oder reformulieren\nB orch|Escalate an Supervisor\nC E|Konvergenz"
+}
+
+Drastisch reduzierte Trainings-Komplexität
+Aspekt	v2.4 Training	Lite Hybrid Training
+Felder im Output	17+	~6
+Regeln zu lernen	~15	~5
+Score-Dimensionen	8	2
+Rechnen nötig	Ja (Summen)	Nein
+Formatstrenge	Hoch	Tolerant
+Samples nötig	500+	200–300
+Min. Modellgröße	14B	3B–7B

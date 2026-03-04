@@ -1,58 +1,60 @@
-# Maestro
+# 🎼 Maestro: AI Orchestration Framework
 
-Maestro is a deterministic local orchestrator that coordinates specialist coding models via Ollama using a specialized **TMP-S Lite validator**.
+Maestro is a high-performance, local-first AI agent framework designed for complex software engineering tasks. It utilizes a decentralized multi-agent architecture to plan, execute, and validate code changes with surgical precision.
 
-## 🚀 Quick Start (Production Setup)
+## 🚀 Installation
 
-Maestro is now optimized to run its validator directly in **Ollama** for maximum stability and speed.
+Ensure you have Python 3.10+ and [Ollama](https://ollama.com/) installed.
 
-1.  **Configure your Run:** Edit `cfg.json` to use the pre-trained GGUF validator:
-    ```json
-    {
-      "validator_backend": "ollama",
-      "validator_model": "qwen3-4b-validator",
-      "max_retries": 2,
-      "abs_max_turns": 6
-    }
-    ```
-2.  **Execute a Request:**
-    ```bash
-    PYTHONPATH=. ./venv/bin/python3.12 maestro/cli.py run --repo ./your-project --request "Write a script..." --cfg cfg.json --unsafe-local
-    ```
+```bash
+# Clone the repository
+git clone https://github.com/Joeavaib/maestro.git
+cd maestro
+
+# Install dependencies
+pip install -e .
+
+# (Optional) Install CXM for deep project context
+# See: https://github.com/Joeavaib/partner
+```
+
+## 🏗️ Forest Architecture (Raven-Luna-Tree)
+
+Maestro has evolved from a monolithic state-machine to the **Forest Architecture**, which eliminates "Validator Fatigue" and maximizes the power of small, fast models.
+
+- **🦅 Raven (Planner):** Strategic architect that breaks requests into a `ForestPlan`.
+- **🌕 Luna (Monitor):** Orchestrator that manages execution, dynamic RAG context via **CXM**, and local retry loops.
+- **🌲 Trees (Workers):** Specialized coding agents (2B to 17B) that execute tasks within protected `FILE:` blocks.
+
+---
+
+## 🛠️ Usage
+
+To run Maestro in the new Forest mode:
+
+```bash
+python -m maestro.cli run --repo ./your-project --request "Your task" --cfg cfg.json --forest
+```
+
+---
 
 ## 🧠 The Fine-Tuning Pipeline
 
-We don't just use generic models. We treat validation as a **trainable skill**.
+We don't just use generic models. We treat orchestration and coding as **trainable skills**.
 
 ### Current Status
-- ✅ **Base Training:** 2,200+ synthetic examples for TMP-S Lite format consistency.
+- ✅ **Base Training:** 2,200+ synthetic examples for protocol consistency.
 - ✅ **Booster Training:** Fine-tuned on real-world multi-file failures and security edge cases.
-- ✅ **Security:** Validator now reliably identifies and aborts malicious requests (`rm -rf /`).
+- ✅ **Forest Flywheel:** Successful Raven plans are automatically logged for future model distillation.
 
 ### Data Evolution Loop
-Every failed or successful run is "Gold".
-1.  **Run:** Run Maestro on a task.
-2.  **Extract:** Use `python3 finetune/scripts/extract_real_pairs.py` to get the training pairs.
-3.  **Correct:** Manually fix any logical errors in the JSONL.
-4.  **Booster:** Retrain the adapter using the new real-world data.
-
-## 🛠️ TMP-S Lite Protocol
-
-The heartbeat of Maestro is the **TMP-S Lite record**:
-
-```text
-A [OK]|[SCORE]|[RATIONALE]
-E [LOCATION]|[FIX]
-B [AGENT]|[ACTION]
-C [DECISION]|[FOCUS]
-```
-
-- **OK:** `0` (Fail) or `1` (Pass/Warn)
-- **Score:** `0-9` (Quality score)
-- **Decisions:** `A` (Accept/Finish), `R` (Reject/Retry), `E` (Escalate/Error)
+Every successful run is "Gold".
+1.  **Run:** Run Maestro on a task using a high-level model (e.g., Gemini) as Raven.
+2.  **Extract:** Successful plans are automatically saved to `finetune/data/forest_gold/`.
+3.  **Finetune:** Distill these plans into smaller, local models (14B - 17B) to achieve full local autonomy.
 
 ---
 
 ## 💻 Development & Training
 
-For instructions on how to retrain the validator or export new GGUF models, see [finetune/TRAINING_ANLEITUNG.md](finetune/TRAINING_ANLEITUNG.md).
+For instructions on how to retrain models or export new GGUF models, see [finetune/TRAINING_ANLEITUNG.md](finetune/TRAINING_ANLEITUNG.md).

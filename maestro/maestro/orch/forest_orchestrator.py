@@ -64,22 +64,63 @@ class ForestOrchestrator:
                 diff = diff_res.stdout.decode('latin-1', errors='replace')
                 
             store.write_text(run_root / "final" / "final_patch.diff", diff)
-            result["run_root"] = str(run_root)
             
-            # --- Auto-Logger for Raven Finetuning ---
+            # --- Production Readiness: Export clean files ---
+            print("[*] Forest Run Successful. Exporting production-ready files...")
+            production_dir = run_root / "final" / "production_ready"
+            production_dir.mkdir(parents=True, exist_ok=True)
+            
+            import shutil
+            def ignore_junk(path, names):
+                return [n for n in names if n in {".git", ".maestro", "__pycache__", ".pytest_cache"}]
+            
             try:
-                finetune_dir = Path("finetune/data/forest_gold")
-                finetune_dir.mkdir(parents=True, exist_ok=True)
-                log_file = finetune_dir / "raven_training.jsonl"
-                
-                training_record = {
-                    "instruction": f"User Request:\n{request_text}\n\nGenerate the Forest Plan as JSON.",
-                    "output": json.dumps(dataclasses.asdict(plan), indent=2)
-                }
-                
-                with open(log_file, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(training_record) + "\n")
-                print(f"[*] Saved successful plan to {log_file} for future finetuning.")
+                # Copy everything from work_repo to production_ready dir
+                shutil.copytree(work_repo, production_dir, ignore=ignore_junk, dirs_exist_ok=True)
+                print(f"[✅] Production-ready files exported to: {production_dir}")
+                result["production_ready_path"] = str(production_dir)
+            except Exception as e:
+                print(f"[!] Warning: Could not export production files: {e}")
+
+            result["run_root"] = str(run_root)
+            return result
+            try:
+                # 1. Log Raven Plan
+                raven_dir = Path("finetune/data/forest_gold/raven")
+                raven_dir.mkdir(parents=True, exist_ok=True)
+                with open(raven_dir / "training.jsonl", "a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "instruction": f"User Request:\n{request_text}\n\nGenerate the Forest Plan as JSON.",
+                        "output": json.dumps(dataclasses.asdict(plan), indent=2)
+                    }) + "\n")
+
+                # 2. Log Luna & Tree Interactions (only from successful runs!)
+                interactions = result.get("interactions", [])
+                if interactions:
+                    tree_dir = Path("finetune/data/forest_gold/tree")
+                    luna_dir = Path("finetune/data/forest_gold/luna")
+                    tree_dir.mkdir(parents=True, exist_ok=True)
+                    luna_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    for inter in interactions:
+                        # Log for Tree training (Successful code generation)
+                        if inter["role"] == "tree" and inter["success"]:
+                            with open(tree_dir / "training.jsonl", "a", encoding="utf-8") as f:
+                                f.write(json.dumps({
+                                    "instruction": f"TASK:\n{inter['task_description']}\n\nCONTEXT:\n{inter['context']}\n\nERRORS:\n{inter['previous_errors']}",
+                                    "output": inter["output"]
+                                }) + "\n")
+                        
+                        # Log for Luna training (Decision making based on errors)
+                        # We log every interaction where Luna had to evaluate an error
+                        if inter["attempt"] > 0 or not inter["success"]:
+                            with open(luna_dir / "training.jsonl", "a", encoding="utf-8") as f:
+                                f.write(json.dumps({
+                                    "instruction": f"EVALUATE ERROR:\n{inter['previous_errors']}\n\nTASK:\n{inter['task_description']}",
+                                    "output": f"Action: Initiate Retry. Model Tier Escalation to {inter['model']}."
+                                }) + "\n")
+
+                print(f"[*] Successfully logged all gold data to finetune/data/forest_gold/")
             except Exception as e:
                 print(f"[!] Could not log training data: {e}")
                 

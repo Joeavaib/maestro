@@ -1,0 +1,6 @@
+# Modelle und schwere Adapter ausschließen
+**/models/*.bin
+**/adapters/*.safetensors
+**/*.onnx
+# Oder spezifische Ordner, falls sie ungewöhnlich groß sind
+large_assets/

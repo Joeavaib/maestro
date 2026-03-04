@@ -22,25 +22,44 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.pytest_cache/
+.mypy_cache/
+.coverage
+.tox/
+.nox/
+.hypothesis/
+.cache/
 
-# Environment
+# Environment and Local Config
 .env
 .venv
 venv/
 ENV/
 env.bak/
 venv.bak/
+.user_config.json
 
 # Maestro specific
 .maestro/
+runs/
 test_repo_*/
 *.jsonl
+tasks.jsonl
+Ansprüche.md
+
+# Archivals and Experiments
+experiments/
+tmp/
+temp/
+*.log
+*.bak
+*.tmp
+*.swp
+*.swo
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
 
 # OS
 .DS_Store
