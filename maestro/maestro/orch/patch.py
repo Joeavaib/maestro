@@ -36,20 +36,27 @@ def apply_diff(repo: Path, diff: str, allow_renames: bool = False, focus: str = 
 
 
 def apply_file_blocks(repo: Path, payload: str) -> dict:
+    import os
     current = None
     buf: list[str] = []
     def flush() -> str | None:
         nonlocal current, buf
         if current is None:
             return None
-        target = (repo / current).resolve()
+            
+        # Strip absolute repo path prefix if the model hallucinates it
+        curr_str = current
+        repo_str = str(repo.resolve())
+        if curr_str.startswith(repo_str):
+            curr_str = curr_str[len(repo_str):].lstrip("/\\")
+            
+        target = (repo / curr_str).resolve()
         if repo.resolve() not in target.parents and target != repo.resolve():
             return "path traversal"
         target.parent.mkdir(parents=True, exist_ok=True)
 
         # Strip markdown fences if present
         clean_buf = []
-        in_fence = False
         for i, line in enumerate(buf):
             if line.startswith("```"):
                 continue

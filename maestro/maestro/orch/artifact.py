@@ -23,26 +23,44 @@ def _extract_fenced_block(output: str) -> str | None:
 
 def parse_artifact(output: str) -> Artifact:
     t = output.lstrip()
-    if t.startswith("diff --git"):
-        return Artifact("diff", t)
-    if t.startswith("FILE: "):
-        return Artifact("file_blocks", t)
+    
+    # 1. Try to find the block (either raw or fenced)
+    fenced = _extract_fenced_block(t)
+    payload = fenced if fenced else t
+    
+    # 2. Identify kind (diff or file_blocks)
+    if payload.startswith("diff --git") or payload.startswith("--- ") or payload.startswith("@@ -"):
+        return Artifact("diff", payload)
+    if payload.startswith("FILE: ") or payload.startswith("+FILE: ") or payload.startswith("+# File: "):
+        # Normalize to FILE:
+        norm_payload = payload
+        if norm_payload.startswith("+"): norm_payload = norm_payload[1:]
+        if norm_payload.startswith("# File: "): norm_payload = "FILE: " + norm_payload[8:]
+        return Artifact("file_blocks", norm_payload)
 
+    # 3. Fallback: Search anywhere in the text
     diff_idx = t.find("diff --git")
+    if diff_idx < 0:
+        diff_idx = t.find("--- ")
+    if diff_idx < 0:
+        diff_idx = t.find("@@ -")
+        
     if diff_idx >= 0:
-        candidate = t[diff_idx:]
-        return Artifact("diff", candidate)
+        raw_payload = t[diff_idx:]
+        # Remove trailing markdown fence if present
+        if "```" in raw_payload:
+            raw_payload = raw_payload.split("```")[0].strip()
+        return Artifact("diff", raw_payload)
 
     file_idx = t.find("FILE: ")
+    if file_idx < 0: file_idx = t.find("+FILE: ")
+    if file_idx < 0: file_idx = t.find("+# File: ")
+        
     if file_idx >= 0:
-        candidate = t[file_idx:]
-        return Artifact("file_blocks", candidate)
-
-    fenced = _extract_fenced_block(t)
-    if fenced:
-        if fenced.startswith("diff --git"):
-            return Artifact("diff", fenced)
-        if fenced.startswith("FILE: "):
-            return Artifact("file_blocks", fenced)
+        # Normalize the substring
+        sub = t[file_idx:]
+        if sub.startswith("+"): sub = sub[1:]
+        if sub.startswith("# File: "): sub = "FILE: " + sub[8:]
+        return Artifact("file_blocks", sub)
 
     return Artifact("invalid", output)

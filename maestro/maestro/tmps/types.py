@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -40,6 +40,37 @@ class CLine:
     strategy: int
     max_retries: int
     focus: str
+
+
+@dataclass
+class LiteError:
+    location: str
+    fix: str
+    severity: str = ""
+    turn_ref: int = -1
+
+    @property
+    def fix_hint(self) -> str:
+        return f"{self.location}: {self.fix}"
+
+
+@dataclass
+class LiteStep:
+    agent: str
+    action: str
+    priority: int = 0
+
+
+@dataclass
+class LiteRecord:
+    ok: int = 1
+    score: int = 5
+    rationale: str = ""
+    errors: list[LiteError] = field(default_factory=list)
+    briefing: list[LiteStep] = field(default_factory=list)
+    decision: str = "R"
+    focus: str = "*"
+    raw: str = ""
 
 
 @dataclass

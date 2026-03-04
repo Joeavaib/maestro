@@ -19,7 +19,7 @@ class RunStore:
     def init_run(self, sid: str | None = None, runid: str | None = None) -> dict[str, Path | str]:
         sid = sid or random_base36(random.randint(1, 16))
         runid = runid or random_base36(random.randint(1, 12))
-        run_root = self.repo_path / ".maestro" / "runs" / sid / runid
+        run_root = self.repo_path / "runs" / sid / runid
         work_repo = self.repo_path / ".maestro" / "work" / sid / runid / "repo"
         (run_root / "turns").mkdir(parents=True, exist_ok=True)
         work_repo.parent.mkdir(parents=True, exist_ok=True)
@@ -29,6 +29,12 @@ class RunStore:
         if work_repo.exists():
             shutil.rmtree(work_repo)
         shutil.copytree(self.repo_path, work_repo, ignore=shutil.ignore_patterns(".maestro", ".git"))
+        
+        import subprocess
+        # Initialize a new git repo in the work directory for patch application
+        subprocess.run(["git", "init"], cwd=work_repo, capture_output=True)
+        subprocess.run(["git", "add", "."], cwd=work_repo, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "initial", "--quiet"], cwd=work_repo, capture_output=True)
 
     @staticmethod
     def write_json(path: Path, payload: dict) -> None:

@@ -16,7 +16,9 @@ For each task, provide:
 - keywords: Comma-separated keywords representing the core logic and files needed.
 - target_files: The main files this task will likely modify.
 - tools: A list of strings specifying required tools. Available tools:
-  - "cxm": Fetches deep project context via RAG. Use this if the task depends on understanding external files, complex imports, or undefined dependencies. Omit if the task is simple or isolated.
+  - "cxm": Fetches deep project context via RAG. CRITICAL RULE: You MUST include "cxm" for ANY task that modifies an EXISTING file, otherwise the Coder will hallucinate the business logic. Omit only when creating completely new, independent files.
+- validation_command: (Optional) A specific shell command to validate this task (e.g., "python3 -m py_compile module.py" or "pytest test_module.py"). If omitted, global checks will run. Use this to avoid running global integration tests on partial/transitional refactoring steps.
+- complexity: An integer from 1 to 4 defining how hard the task is. 1 = Trivial (formatting, pure boilerplate). 2 = Normal (standard logic, single file). 3 = Complex (tricky logic, deep regex, algorithms). 4 = Expert (massive refactoring, highly coupled architectural shifts).
 
 Respond ONLY with valid JSON. No markdown formatting, no explanations.
 
@@ -30,7 +32,9 @@ Example Output:
       "intent": "Bugfix",
       "keywords": "db.py, connection, mutex, lock",
       "target_files": "db.py",
-      "tools": ["cxm"]
+      "tools": ["cxm"],
+      "validation_command": "python3 -m py_compile db.py",
+      "complexity": 2
     }
   ]
 }
@@ -48,10 +52,7 @@ class Raven:
     def plan(self, request_text: str) -> ForestPlan:
         print("[🦅 Raven] Analyzing request and creating Forest Plan...")
         
-        prompt = f"User Request:
-{request_text}
-
-Generate the Forest Plan as JSON."
+        prompt = f"User Request:\n{request_text}\n\nGenerate the Forest Plan as JSON."
         
         # We use a low temperature for deterministic planning
         options = {"temperature": 0.1, "top_p": 0.9}
@@ -76,8 +77,7 @@ Generate the Forest Plan as JSON."
             print(f"[🦅 Raven] Plan created with {len(plan.tasks)} tasks.")
             return plan
         except json.JSONDecodeError as e:
-            print(f"[!] Raven failed to generate valid JSON: {e}
-Raw output: {raw_output}")
+            print(f"[!] Raven failed to generate valid JSON: {e}\nRaw output: {raw_output}")
             # Fallback Plan
             return ForestPlan(
                 goal="Fallback Plan",

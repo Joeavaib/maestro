@@ -1,66 +1,144 @@
-VALIDATOR_SYSTEM_PROMPT = """You are the TMP-S v2.4 validator. Output ONLY TMP-S records, no prose.
+from __future__ import annotations
 
-Output order is fixed and mandatory:
-V -> A -> E* -> B{3..7} -> C
-V is mandatory in v2.4.
+VALIDATOR_SYSTEM_PROMPT = """You are the TMP-S Lite Validator. Output ONLY Lite records, no prose.
 
-Formatting rules:
-- No spaces around pipes.
-- hard4 is 4 bits: Schema, Constraints, Refs, Determinism.
-- soft4 is 4 digits: Correctness, Adherence, Completeness, Clarity.
-- verdict is one of P,W,F,H.
-- rationale is <= 12 words.
-- Freitext fields (rationale, fix_hint, action) must not contain literal '|'. Escape literal pipes as '\\|'.
-- B block must contain 3..7 lines, pri ascending, pri 1..7.
-- agent is 2..4 lowercase letters.
+### FORMAT:
+A ok|score|rationale
+E location|fix (optional, max 3)
+B agent|action (optional, max 3)
+C decision|focus (optional)
 
-Verdict derivation is deterministic:
-- If any hard bit is 0 => verdict=H
-- Else if sum(soft) >= 28 => verdict=P
-- Else if 20 <= sum(soft) < 28 => verdict=W
-- Else => verdict=F
+### FIELDS:
+- ok: 0 (Fail) or 1 (Pass/Warn)
+- score: 0-9 (Quality score)
+- rationale: Brief explanation
+- decision: A (Accept), R (Reject/Retry), E (Escalate)
+- focus: file path or *
 
-C line:
-C decision|strategy|max_retries|focus
-decision in {A,R,X,E}
-strategy in 0..5
-max_retries is remaining retry budget AFTER this turn (0..9)
-focus is '*' or dotpath or up to 3 comma-separated dotpaths
+### CRITICAL RULES:
+1. ONLY lines starting with A, E, B, or C are allowed.
+2. If request is fulfilled and checks are 'ok' -> A 1|9|... C A|*
+3. If error exists -> A 0|score|... E file|fix ... B agent|task ... C R|file
+4. Turn 0 must always be C R|* or C R|file.
+"""
 
-Decision default mapping (the orchestrator may normalize if you are inconsistent):
-- verdict in {P,W} => decision=A
-- verdict=F => decision=R if max_retries>0 else E
-- verdict=H => decision=R by default, X only if clear reroute is required
-- decision=A is invalid when verdict is F or H
+VALIDATOR_SYSTEM_PROMPT_WITH_TOOLS = """You are the TMP-S Lite Validator with REPO TOOLS.
 
-E lines:
-E dotpath|severity|fix_hint[|turn_ref]
-severity in {C,H,M,L}
-turn_ref only if DEEP mode is explicitly indicated in input.
+### OUTPUT OPTIONS:
+You have TWO possible output formats:
 
-B lines:
-B 1 determines next specialist and its task. B2..Bn are queued steps for decompose or follow-up.
+1. TOOL CALL (when you need to inspect the repo):
+   TOOL:tool_name|arg1=value1|arg2=value2
+   
+   Available tools:
+   - list_files(pattern='**/*.py', max_results=50)
+   - read_file(path='src/main.py', offset=0, limit=100)
+   - grep_repo(query='class ', file_pattern='*.py', max_results=20)
+   - get_repo_structure(max_depth=3)
+   - check_symbol(symbol='MyClass', language='py')
 
-Your job:
-Given the request, latest artifact, patch apply status, checks results, and context snippets, emit the next TMP-S record that drives the orchestrator toward Accept or Escalate."""
+2. TMP-S LITE RECORD (final decision):
+   A ok|score|rationale
+   E location|fix (optional, max 3)
+   B agent|action (optional, max 3)
+   C decision|focus (optional)
 
+### DECISION FLOW:
+1. Analyze the current state from [PATCH_APPLY] and [CHECKS]
+2. IF you need to verify something in the repo -> Output TOOL call.
+3. WHEN you have enough information -> Output final Lite record.
 
-def build_specialist_prompt(strategy: int, agent: str, request: str, last_tmps_record_raw: str, delta: str, task: str) -> str:
-    if strategy == 5:
-        return (
-            f"[SYSTEM] You are {agent}. Answer ONLY with a minimal patch.\n"
-            f"[CONTEXT] Request summary: {request[:700]}\n"
-            f"[VALIDATOR] {last_tmps_record_raw}\n"
-            f"[DELTA] {delta}\n"
-            f"[TASK] {task}\n\n"
-            "[OUTPUT-FORMAT]\n"
-            "- Output ONLY the corrected section for {focus}.\n"
-            "- No explanations. No extra parts."
-        )
-    return (
-        f"[SYSTEM] You are {agent}. Solve ONLY the described subproblem.\n"
-        f"[CONTEXT] Original request: {request}\n"
-        f"[VALIDATOR] {last_tmps_record_raw}\n"
-        f"[DELTA] {delta}\n"
-        f"[TASK] {task}"
+### CRITICAL RULES:
+1. Use tools BEFORE making final decision if unsure.
+2. Max 3 tool calls per turn.
+3. Output EXACT Lite format for final decision.
+"""
+
+# Specialist prompts - NO TMP-S, human readable only!
+
+def build_specialist_prompt(
+    strategy: int, 
+    agent: str, 
+    request: str, 
+    validator_feedback: str, 
+    delta: str, 
+    task: str
+) -> str:
+    """
+    Build a prompt for specialist agents.
+    Optimized for small models (3B-8B) to ensure valid git diffs.
+    """
+    
+    header = (
+        f"### YOU ARE A {agent.upper()} SPECIALIST ###\n"
+        f"STRICT TASK: {task}\n\n"
+        f"USER REQUEST: {request[:500]}\n"
+        f"VALIDATOR FEEDBACK: {validator_feedback}\n"
+        f"CURRENT CODE/CONTEXT:\n{delta}\n\n"
     )
+
+    instructions = (
+        "### OUTPUT FORMAT RULES (CRITICAL) ###\n"
+        "1. NO PROSE. NO EXPLANATIONS. NO MARKDOWN BLOCKS (```).\n"
+        "2. FOR CHANGES: Output ONLY a UNIFIED DIFF.\n"
+        "   - MUST start with: --- a/path/to/file\n"
+        "   - MUST follow with: +++ b/path/to/file\n"
+        "3. FOR NEW FILES: Output ONLY a FILE block.\n"
+        "   - Format: FILE: path/to/file\\n<CONTENT>\n\n"
+        "### EXAMPLE OF VALID DIFF (FOLLOW THIS EXACTLY): ###\n"
+        "--- a/hello.py\n"
+        "+++ b/hello.py\n"
+        "@@ -1,3 +1,4 @@\n"
+        " def main():\n"
+        "+    \"\"\"This is a docstring.\"\"\"\n"
+        "     print('Hello')\n\n"
+        "### START YOUR RESPONSE WITH --- OR FILE: ###"
+    )
+    
+    return header + instructions
+
+
+def build_validator_feedback(
+    verdict: str,
+    rationale: str,
+    errors: list[str],
+    patch_applied: bool,
+    checks_summary: str
+) -> str:
+    """
+    Convert TMPS validator output to human-readable feedback for specialists.
+    
+    Args:
+        verdict: P (Pass), W (Warning), F (Fail), H (Hard Fail)
+        rationale: Short description of the issue
+        errors: List of specific errors found
+        patch_applied: Whether the patch was successfully applied
+        checks_summary: Summary of check results
+    
+    Returns:
+        Human-readable feedback string
+    """
+    verdict_map = {
+        "P": "✓ PASSED - Changes look good",
+        "W": "⚠ WARNING - Minor issues, can proceed",
+        "F": "✗ FAILED - Needs revision",
+        "H": "✗ HARD FAIL - Major issues detected"
+    }
+    
+    feedback_lines = [
+        f"Status: {verdict_map.get(verdict, verdict)}",
+        f"Issue: {rationale}",
+    ]
+    
+    if not patch_applied:
+        feedback_lines.append("CRITICAL: Patch could not be applied - likely syntax error or wrong line numbers")
+    
+    if checks_summary and checks_summary != "passed":
+        feedback_lines.append(f"Checks: {checks_summary}")
+    
+    if errors:
+        feedback_lines.append("Specific errors:")
+        for err in errors[:5]:  # Limit to 5 errors
+            feedback_lines.append(f"  - {err}")
+    
+    return "\n".join(feedback_lines)

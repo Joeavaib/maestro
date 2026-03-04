@@ -36,8 +36,7 @@ class ForestOrchestrator:
         
         luna = Luna(self.cfg, self.llm, cxm_bridge)
         
-        print(f"
-[🌳 Forest Pipeline] Starting run in {work_repo}")
+        print(f"\\n[🌳 Forest Pipeline] Starting run in {work_repo}")
         
         # 1. RAVEN: Strategic Planning
         plan = raven.plan(request_text)

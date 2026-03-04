@@ -19,7 +19,7 @@ def _default_escalate_to_human() -> None:
 def handle_request(user_input: str):
     model = TMPSValidatorModel(
         base_model="Qwen/Qwen3-4B",
-        adapter_path="./out/qwen4b-tmps-lora-rocm",
+        adapter_path="finetune/adapters/qwen4b-tmps-lora-rocm",
     )
     controller = TMPSController(model)
 

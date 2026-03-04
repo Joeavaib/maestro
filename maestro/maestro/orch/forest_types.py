@@ -13,6 +13,8 @@ class TreeTask:
     keywords: str
     target_files: str
     tools: List[str] = field(default_factory=list)
+    validation_command: Optional[str] = None
+    complexity: int = 2  # 1=Trivial, 2=Normal, 3=Complex, 4=Expert
 
 @dataclass
 class ForestPlan:

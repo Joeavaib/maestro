@@ -24,7 +24,7 @@ def test_validate_tmps_semantics_accepts_valid_record():
 def test_tmps_semantics_verdict_derivation():
     rec = parse_tmps(VALID_RECORD.replace("A 1111|6655|W|", "A 1111|6655|F|"), strict=True)
     with pytest.raises(TMPSValidationError, match="verdict mismatch"):
-        validate_tmps_semantics(rec)
+        validate_tmps_semantics(rec, expected_budget_after_turn=0)
 
 
 def test_validate_tmps_semantics_rejects_max_retries_mismatch():
@@ -34,6 +34,13 @@ def test_validate_tmps_semantics_rejects_max_retries_mismatch():
 
 
 def test_validate_tmps_semantics_rejects_decision_for_zero_budget():
-    rec = parse_tmps(VALID_RECORD.replace("A 1111|6655|W|good enough", "A 1011|6655|H|good enough").replace("C A|1|0|*", "C R|1|0|*"), strict=True)
+    # Verdict F (Fail) but budget 0 -> Decision must be E, not R
+    rec = parse_tmps(VALID_RECORD.replace("A 1111|6655|W|good enough", "A 1111|2222|F|bad").replace("C A|1|0|*", "C R|1|0|*"), strict=True)
     with pytest.raises(TMPSValidationError, match="max_retries=0"):
-        validate_tmps_semantics(rec)
+        validate_tmps_semantics(rec, expected_budget_after_turn=0)
+
+
+def test_validate_tmps_semantics_rejects_turn_mismatch():
+    rec = parse_tmps(VALID_RECORD, strict=True)  # VALID_RECORD has turn 1
+    with pytest.raises(TMPSValidationError, match="turn mismatch"):
+        validate_tmps_semantics(rec, expected_budget_after_turn=0, expected_turn=2)

@@ -42,23 +42,17 @@ def _mk_validator_input(case: SynthCase) -> str:
 
 
 def _mk_tmps(case: SynthCase) -> str:
-    sid = "synth"
-    runid = "gen"
-    verdict = "P"
-    decision = "A"
-    if not case.patch_ok:
-        verdict, decision = "F", ("R" if case.budget > 0 else "E")
-    elif not case.checks_ok:
-        verdict, decision = "H", ("R" if case.budget > 0 else "E")
+    ok = 1 if case.patch_ok and case.checks_ok else 0
+    score = 9 if ok else 3
+    decision = "A" if ok else ("R" if case.budget > 0 else "E")
+    rationale = "synthetic success" if ok else "synthetic failure"
 
-    return "\n".join(
-        [
-            "V 2.4|synth|gen|0",
-            f"A {sid}|{runid}|{verdict}|synthetic",
-            "B 1:imp|fix based on checks",
-            f"C {decision}|repair|{case.budget}|*",
-        ]
-    )
+    lines = [f"A {ok}|{score}|{rationale}"]
+    if not ok:
+        lines.append("E repo|fix issue")
+    lines.append("B imp|fix based on checks")
+    lines.append(f"C {decision}|*")
+    return "\n".join(lines)
 
 
 def main() -> None:

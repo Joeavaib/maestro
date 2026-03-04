@@ -20,12 +20,13 @@ You will be provided with:
 Rules:
 - Solve ONLY the requested task.
 - Do NOT provide conversational filler.
-- To MODIFY an existing file, output standard Unified Diff format.
-- To CREATE a new file or completely rewrite one, use the FILE block format exactly like this:
+- DO NOT use Unified Diff format. Small syntax errors in diffs cause pipeline failures.
+- ALWAYS use the FILE block format to write or modify code, exactly like this:
 FILE: path/to/file.py
 <your complete code here>
 
-WARNING: If you use the FILE block format to modify an existing file, you MUST include the ENTIRE file content. Do not truncate, omit, or remove existing functions that are not part of your task.
+WARNING: You MUST output the ENTIRE file content. Do not truncate, omit, or remove existing functions that are not part of your task.
+WARNING: Only use RELATIVE paths in the FILE header (e.g. 'FILE: src/main.py', NOT 'FILE: /home/user/...').
 """
 
 class Luna:
@@ -69,31 +70,48 @@ class Luna:
             print("[🌕 Luna] Forest Plan failed. Escalating.")
             return {"decision": "E", "status": "failed"}
 
+    def _get_dynamic_model(self, base_complexity: int, attempt: int) -> str:
+        """Calculates the required model tier based on task complexity and retry escalation."""
+        # Models mapped by tier (1=Trivial, 2=Normal, 3=Complex, 4=Expert)
+        # Note: Replace these strings with your actual local model names in Ollama.
+        model_tiers = {
+            1: "qwen3.5:2b",        # Very fast, for simple formatting
+            2: "qwen3.5:4b",        # Default workhorse
+            3: "qwen3.5:9b",        # Advanced logic
+            4: "qwen3.5-coder:17b"  # The Sniper / Expert (placeholder)
+        }
+        
+        # Escalate complexity with each failed attempt!
+        effective_complexity = min(4, base_complexity + attempt)
+        
+        return model_tiers.get(effective_complexity, model_tiers[4])
+
     def _run_tree_with_retries(self, repo_path: Path, task: TreeTask) -> bool:
         import subprocess
         """Runs the worker model and checks the hooks, up to max_retries."""
         
-        # We assume there is a default agent config for the "bldr" or we use a standard coder
-        agent_cfg = self.cfg.agents.get("bldr") # Using existing builder config as fallback
-        model = agent_cfg.model if agent_cfg else self.cfg.validator_model
-        
         context_block = ""
         previous_errors = ""
         
+        # Pre-fetch context if Raven explicitly requested it
+        if "cxm" in task.tools:
+            print(f"[🌕 Luna] Raven requested CXM for this task. Harvesting context immediately...")
+            context_block = self.cxm.harvest(task.keywords, task.intent)
+        
         for attempt in range(self.max_tree_retries):
+            # Dynamic Model Selection based on complexity and escalation
+            current_model = self._get_dynamic_model(task.complexity, attempt)
+            
             # Revert workspace to the last successful state before starting the attempt
             subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=repo_path, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=repo_path, capture_output=True)
 
-            print(f"[🌲 Tree] Spawning Tree for '{task.id}' (Attempt {attempt+1}/{self.max_tree_retries})...")
+            print(f"[🌲 Tree] Spawning Tree '{current_model}' for '{task.id}' (Attempt {attempt+1}/{self.max_tree_retries})...")
             
-            # Lazy Context Harvesting (Only on first failure / retry)
+            # Lazy Context Harvesting fallback: If no tools were requested but the tree fails, we force CXM
             if attempt > 0 and not context_block:
-                if "cxm" in task.tools:
-                    print(f"[🌕 Luna] Hook failed previously. Raven requested CXM. Harvesting context...")
-                    context_block = self.cxm.harvest(task.keywords, task.intent)
-                else:
-                    print(f"[🌕 Luna] Hook failed. No context tools requested by Raven. Retrying blindly...")
+                print(f"[🌕 Luna] Hook failed. Forcing CXM context harvest to help the Tree recover...")
+                context_block = self.cxm.harvest(task.keywords, task.intent)
             
             # Prepare Prompt
             prompt = f"TASK DESCRIPTION:\\n{task.description}\\n\\n"
@@ -110,7 +128,7 @@ class Luna:
             # Generate Code
             options = {"temperature": 0.2 + (attempt * 0.1)} # Increase creativity on retries slightly
             output = self.llm.generate(
-                model=model,
+                model=current_model,
                 prompt=prompt,
                 options=options,
                 system=TREE_SYSTEM_PROMPT,
@@ -146,23 +164,34 @@ class Luna:
                 continue
                 
             # Run Hooks (Checks)
-            print("[🌕 Luna] Verifying Hooks (Automated Checks)...")
-            checks = run_checks(repo_path, self.cfg, patch_applied=True)
-            
-            if checks["summary"] == "ok":
-                print(f"[🌕 Luna] Hooks passed for '{task.id}'. Tree execution successful.")
-                return True
+            print("[🌕 Luna] Verifying Hooks...")
+            if getattr(task, 'validation_command', None):
+                print(f"[🌕 Luna] Running custom validation command: {task.validation_command}")
+                import subprocess
+                cmd_res = subprocess.run(task.validation_command, shell=True, cwd=repo_path, capture_output=True, text=True)
+                if cmd_res.returncode == 0:
+                    print(f"[🌕 Luna] Custom hook passed for '{task.id}'. Tree execution successful.")
+                    return True
+                else:
+                    previous_errors = f"Validation Failed ({task.validation_command}):\n{cmd_res.stdout}\n{cmd_res.stderr}".strip()
+                    print(f"[🌕 Luna] Hook Failed (Custom): {previous_errors[:500]}...")
             else:
-                # Extract error tail (Combine stdout and stderr since tools like pytest use stdout for failures)
-                error_tails = []
-                for cmd in checks.get("commands", []):
-                    if cmd["exit_code"] != 0:
-                        out = cmd.get("stdout_tail", "")
-                        err = cmd.get("stderr_tail", "")
-                        combined = f"{out}\n{err}".strip()
-                        error_tails.append(combined)
-                        
-                previous_errors = "Tests/Checks Failed:\\n" + "\\n---\\n".join(error_tails)
-                print(f"[🌕 Luna] Hook Failed (Checks): {previous_errors[:500]}...")
-        
-        return False
+                checks = run_checks(repo_path, self.cfg, patch_applied=True)
+
+                if checks["summary"] == "ok":
+                    print(f"[🌕 Luna] Hooks passed for '{task.id}'. Tree execution successful.")
+                    return True
+                else:
+                    # Extract error tail (Combine stdout and stderr since tools like pytest use stdout for failures)
+                    error_tails = []
+                    for cmd in checks.get("commands", []):
+                        if cmd["exit_code"] != 0:
+                            out = cmd.get("stdout_tail", "")
+                            err = cmd.get("stderr_tail", "")
+                            combined = f"{out}\n{err}".strip()
+                            error_tails.append(combined)
+
+                    previous_errors = "Tests/Checks Failed:\n" + "\n---\n".join(error_tails)
+                    print(f"[🌕 Luna] Hook Failed (Global Checks): {previous_errors[:500]}...")
+
+            return False
