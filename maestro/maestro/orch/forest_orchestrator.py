@@ -30,7 +30,7 @@ class ForestOrchestrator:
         
         # Initalize Roles
         raven_model = self.cfg.validator_model  # High-level model for planning
-        raven = Raven(self.raven_client, raven_model)
+        raven = Raven(self.raven_client, raven_model, self.cfg)
         
         cxm_bridge = CXMBridge(str(work_repo))
         

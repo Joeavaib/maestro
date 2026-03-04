@@ -49,6 +49,14 @@ Die Kommunikation zwischen Luna, CXM und den Trees erfolgt über standardisierte
 *   **Lokale Retries:** Wenn ein Tree scheitert, meldet Luna den Fehler (Compiler-Error, Test-Fail) direkt an den Tree zurück und initiiert einen Retry (z.B. max 3 Versuche). 
 *   **Schutz:** Raven wird erst wieder kontaktiert, wenn Luna trotz aller Retries scheitert (Eskalation) oder die gesamte Kette erfolgreich durchlaufen wurde.
 
+### 4. 🧠 Dynamische Spezialisierung (Vision)
+Um die Effizienz zu maximieren, werden Worker (Trees) nicht nur nach Komplexität, sondern nach **Domänen-Kompetenz** zugewiesen:
+*   **Sicherheitsrelevante Module:** Einsatz von Reasoning-Monstern wie `GLM-4.7-Flash-Claude` für Deep-Reasoning und Schwachstellen-Analyse.
+*   **Performance & Core Logic:** `DeepSeek-Coder-V2` als spezialisierter Worker für hocheffizienten, algorithmischen Code.
+*   **Boilerplate & UI:** Leichtere Modelle wie `Qwen-Coder` für schnelle Iterationen.
+
+Luna erkennt das Zielmodul und wählt den passenden "Spezial-Tree" aus der Registry.
+
 ### 4. 🌲 The Trees (The Specialist Coders)
 **"Wachsen im Wald und erledigen die Arbeit."**
 *   **Verantwortung:** Reine Ausführung. Ein Tree ist ein Coder-LLM, das den durch CXM perfekten Prompt (Aufgabe + Dateikontext) erhält.

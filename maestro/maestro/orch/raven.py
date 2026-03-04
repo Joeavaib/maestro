@@ -45,9 +45,10 @@ class Raven:
     Raven acts as the strategic planner.
     It takes the user request and outputs a ForestPlan (Task List).
     """
-    def __init__(self, llm_client, model_name: str):
+    def __init__(self, llm_client, model_name: str, cfg: Optional[RunnerConfig] = None):
         self.llm = llm_client
         self.model = model_name
+        self.cfg = cfg
 
     def plan(self, request_text: str) -> ForestPlan:
         print("[🦅 Raven] Analyzing request and creating Forest Plan...")
@@ -57,12 +58,24 @@ class Raven:
         # We use a low temperature for deterministic planning
         options = {"temperature": 0.1, "top_p": 0.9}
         
+        # Check thinking flag for the model in registry
+        # The raven_model in forest_orchestrator is actually a resolved model name/path, 
+        # but the key in registry is usually 'raven_primary'. 
+        # However, cfg.validator_model might be the key itself before resolution or the resolved name.
+        # Let's try to find if any registry entry uses this model.
+        skip_strip = False
+        if self.cfg:
+            # We check if validator_model matches any key or resolved name
+            reg_key = "raven_primary" # Default for Raven
+            skip_strip = self.cfg.get_registry_flag(reg_key, "thinking", False)
+        
         raw_output = self.llm.generate(
             model=self.model,
             prompt=prompt,
             options=options,
             system=RAVEN_SYSTEM_PROMPT,
-            keep_alive="5m"
+            keep_alive="5m",
+            skip_strip_thinking=skip_strip
         )
         
         # Cleanup potential markdown ticks if the model ignores the prompt

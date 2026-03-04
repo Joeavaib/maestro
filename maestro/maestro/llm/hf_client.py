@@ -70,7 +70,7 @@ class HFClient:
             return f"{system}\n\n{prompt}"
         return prompt
 
-    def generate(self, model: str, prompt: str, options: dict | None = None, system: str | None = None) -> str:
+    def generate(self, model: str, prompt: str, options: dict | None = None, system: str | None = None, skip_strip_thinking: bool = False) -> str:
         tokenizer, loaded_model = self._load_model(model)
         opts = dict(options or {})
         
@@ -102,7 +102,7 @@ class HFClient:
                 messages,
                 add_generation_prompt=True,
                 return_tensors="pt",
-                enable_thinking=False,
+                enable_thinking=not skip_strip_thinking,
             )
         except TypeError:
             # Fallback for models/tokenizers that don't support enable_thinking

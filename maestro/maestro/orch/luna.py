@@ -72,16 +72,41 @@ class Luna:
             print("[🌕 Luna] Forest Plan failed. Escalating.")
             return {"decision": "E", "status": "failed", "interactions": self.gold_interactions}
 
-    def _get_dynamic_model(self, base_complexity: int, attempt: int) -> str:
+    def _get_dynamic_model(self, base_complexity: int, attempt: int) -> tuple[str, str | None]:
         """Calculates the required model tier based on task complexity and retry escalation."""
-        model_tiers = {
+        # Map complexity tiers to registry keys
+        tier_keys = {
+            1: "tree_fast",
+            2: "tree_standard",
+            3: "tree_strong",
+            4: "tree_deepseek",
+            5: "tree_expert"
+        }
+        
+        effective_complexity = min(5, base_complexity + attempt)
+        key = tier_keys.get(effective_complexity, "tree_expert")
+        
+        # Resolve from registry if possible
+        if key in self.cfg.registry:
+            reg = self.cfg.registry[key]
+            return (reg.get("model") or reg.get("path") or reg.get("name") or key), key
+            
+        # Fallback to hardcoded defaults if registry is missing
+        fallbacks = {
             1: "qwen2.5:1.5b",
             2: "qwen2.5:3b",
             3: "qwen2.5:14b",
-            4: "deepseek-v2:16b"
+            4: "deepseek-v2:16b",
+            5: "glm-4-flash:9b"
         }
-        effective_complexity = min(4, base_complexity + attempt)
-        return model_tiers.get(effective_complexity, model_tiers[4])
+        return fallbacks.get(effective_complexity, fallbacks[5]), None
+
+    def _resolve_reg_model(self, key: str) -> str:
+        """Helper to get a model name/path from registry key."""
+        if key in self.cfg.registry:
+            reg = self.cfg.registry[key]
+            return reg.get("model") or reg.get("path") or reg.get("name") or key
+        return key
 
     def _verify_with_shield(self, repo_path: Path, task: TreeTask) -> tuple[bool, str]:
         """Runs the validation command but 'hardens' the code first to prevent hangs."""
@@ -141,34 +166,69 @@ class Luna:
         
         for attempt in range(self.max_tree_retries):
             # Dynamic Model Selection
-            current_model = self._get_dynamic_model(task.complexity, attempt)
+            current_model, reg_key = self._get_dynamic_model(task.complexity, attempt)
             
             subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=repo_path, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=repo_path, capture_output=True)
 
-            print(f"[🌲 Tree] Spawning Tree '{current_model}' for '{task.id}' (Attempt {attempt+1}/{self.max_tree_retries})...")
+            # Rescue Loop: GLM Plans -> DeepSeek Builds
+            expert_plan = ""
+            is_rescue = (reg_key == "tree_expert") or (task.complexity >= 4 and attempt > 0)
+            
+            if is_rescue:
+                expert_model_name = self._resolve_reg_model("tree_expert")
+                print(f"[🌕 Luna-Rescue] GLM-Claude ({expert_model_name}) is drafting an implementation plan...")
+                
+                plan_prompt = f"TASK DESCRIPTION:\n{task.description}\n\nTARGET FILES:\n{task.target_files}\n\n"
+                if context_block:
+                    plan_prompt += f"BACKGROUND CONTEXT:\n{context_block}\n\n"
+                if previous_errors:
+                    plan_prompt += f"PREVIOUS ERRORS (FIX THESE):\n{previous_errors}\n\n"
+                
+                plan_prompt += "Your Goal: Provide a detailed, step-by-step technical implementation plan. Do NOT write the final code yet, focus on architectural correctness and logic."
+                
+                expert_plan = self.llm.generate(
+                    model=expert_model_name,
+                    prompt=plan_prompt,
+                    system="You are an expert software architect. Plan the solution meticulously.",
+                    skip_strip_thinking=True
+                )
+                
+                # Switch model to DeepSeek for actual building
+                current_model = self._resolve_reg_model("tree_deepseek")
+                print(f"[🌲 Tree] DeepSeek-V2 is now building based on GLM's plan...")
+            else:
+                print(f"[🌲 Tree] Spawning Tree '{current_model}' for '{task.id}' (Attempt {attempt+1}/{self.max_tree_retries})...")
             
             if attempt > 0 and not context_block:
                 print(f"[🌕 Luna] Hook failed. Forcing CXM context harvest to help the Tree recover...")
                 context_block = self.cxm.harvest(task.keywords, task.intent)
             
             # Prepare Prompt
-            prompt = f"TASK DESCRIPTION:\\n{task.description}\\n\\n"
-            prompt += f"TARGET FILES:\\n{task.target_files}\\n\\n"
+            prompt = f"TASK DESCRIPTION:\n{task.description}\n\n"
+            prompt += f"TARGET FILES:\n{task.target_files}\n\n"
+            if expert_plan:
+                prompt += f"### MANDATORY IMPLEMENTATION PLAN (Follow this exactly):\n{expert_plan}\n\n"
             if context_block:
-                prompt += f"BACKGROUND CONTEXT:\\n{context_block}\\n\\n"
+                prompt += f"BACKGROUND CONTEXT:\n{context_block}\n\n"
             if previous_errors:
-                prompt += f"PREVIOUS ERRORS (FIX THESE):\\n{previous_errors}\\n\\n"
+                prompt += f"PREVIOUS ERRORS (FIX THESE):\n{previous_errors}\n\n"
             prompt += "Provide your solution as a FILE block."
             
             # Generate Code
             options = {"temperature": 0.2 + (attempt * 0.1)}
+            
+            skip_strip = False
+            if reg_key and not is_rescue:
+                skip_strip = self.cfg.get_registry_flag(reg_key, "thinking", False)
+
             output = self.llm.generate(
                 model=current_model,
                 prompt=prompt,
                 options=options,
                 system=TREE_SYSTEM_PROMPT,
-                keep_alive="30s"
+                keep_alive="30s",
+                skip_strip_thinking=skip_strip
             )
             
             # Log interaction for Luna/Tree training

@@ -44,6 +44,13 @@ class RunnerConfig:
     parallel_decompose: bool = False  # reserved; current runtime is strictly sequential
     validator_input_cap: int = 24000
     validator_max_tool_calls: int = 3
+    registry: dict[str, Any] = field(default_factory=dict)
+
+    def get_registry_flag(self, model_key: str, flag: str, default: Any = False) -> Any:
+        """Helper to get a flag for a model from the registry."""
+        if model_key in self.registry:
+            return self.registry[model_key].get(flag, default)
+        return default
 
     @classmethod
     def from_json_file(cls, path: str | Path) -> "RunnerConfig":
@@ -126,6 +133,7 @@ class RunnerConfig:
             parallel_decompose=False,
             validator_input_cap=int(raw.get("validator_input_cap", 24000)),
             validator_max_tool_calls=int(raw.get("validator_max_tool_calls", 3)),
+            registry=registry,
         )
 
         if cfg.execution_mode not in {"sandboxed", "unsafe-local"}:

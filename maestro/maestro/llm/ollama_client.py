@@ -32,7 +32,7 @@ class OllamaClient:
         self.host = host.rstrip("/")
         self.timeout_s = timeout_s
 
-    def generate(self, model: str, prompt: str, options: dict | None = None, system: str | None = None, keep_alive: str | int | None = None) -> str:
+    def generate(self, model: str, prompt: str, options: dict | None = None, system: str | None = None, keep_alive: str | int | None = None, skip_strip_thinking: bool = False) -> str:
         # Prepend system prompt to the main prompt to ensure compatibility
         full_prompt = prompt
         if system:
@@ -62,7 +62,8 @@ class OllamaClient:
         response = body.get("response", "")
         print(f"[DEBUG] Raw response: {response}")
         
-        # Strip thinking and prose
-        response = _strip_thinking(response)
+        # Strip thinking and prose unless skipped
+        if not skip_strip_thinking:
+            response = _strip_thinking(response)
         
         return response

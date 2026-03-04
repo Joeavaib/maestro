@@ -1,27 +1,39 @@
 {
   "raven_primary": {
     "backend": "ollama",
-    "model": "hf.co/TeichAI/Qwen3-14B-Claude-4.5-Opus-High-Reasoning-Distill-GGUF:Q4_K_M"
+    "model": "hf.co/TeichAI/Qwen3-14B-Claude-4.5-Opus-High-Reasoning-Distill-GGUF:Q4_K_M",
+    "thinking": true
   },
   "luna_monitor": {
     "backend": "ollama",
-    "model": "hf.co/unsloth/gemma-3-12b-it-GGUF:Q4_K_M"
+    "model": "hf.co/unsloth/gemma-3-12b-it-GGUF:IQ4_XS",
+    "thinking": true
   },
   "tree_fast": {
     "backend": "ollama",
-    "model": "qwen2.5-coder:7b"
+    "model": "qwen2.5-coder:7b",
+    "thinking": false
   },
   "tree_standard": {
     "backend": "ollama",
-    "model": "qwen3.5:4b"
+    "model": "qwen3.5:4b",
+    "thinking": false
   },
   "tree_strong": {
     "backend": "ollama",
-    "model": "qwen3.5:9b"
+    "model": "qwen3.5:9b",
+    "thinking": true
+  },
+  "tree_expert": {
+    "backend": "ollama",
+    "model": "hf.co/TeichAI/GLM-4.7-Flash-Claude-Opus-4.5-High-Reasoning-Distill-GGUF:IQ3_M",
+    "thinking": true,
+    "note": "Final escalation tier for high-reasoning tasks"
   },
   "tree_deepseek": {
     "backend": "llamacpp",
-    "path": "models/deepseekv2/model.gguf",
+    "path": "models/deepseek-v2-lite-IQ4_XS.gguf",
+    "thinking": false,
     "note": "Manually placed high-performance worker"
   }
 }
