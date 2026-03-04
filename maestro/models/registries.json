@@ -1,0 +1,27 @@
+{
+  "raven_primary": {
+    "backend": "ollama",
+    "model": "hf.co/TeichAI/Qwen3-14B-Claude-4.5-Opus-High-Reasoning-Distill-GGUF:Q4_K_M"
+  },
+  "luna_monitor": {
+    "backend": "ollama",
+    "model": "hf.co/unsloth/gemma-3-12b-it-GGUF:Q4_K_M"
+  },
+  "tree_fast": {
+    "backend": "ollama",
+    "model": "qwen2.5-coder:7b"
+  },
+  "tree_standard": {
+    "backend": "ollama",
+    "model": "qwen3.5:4b"
+  },
+  "tree_strong": {
+    "backend": "ollama",
+    "model": "qwen3.5:9b"
+  },
+  "tree_deepseek": {
+    "backend": "llamacpp",
+    "path": "models/deepseekv2/model.gguf",
+    "note": "Manually placed high-performance worker"
+  }
+}

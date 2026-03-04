@@ -2,7 +2,7 @@
   "ollama_host": "http://127.0.0.1:11434",
   "ollama_timeout_s": 300,
   "validator_backend": "ollama",
-  "validator_model": "qwen2.5:14b",
+  "validator_model": "raven_primary",
   "validator_seed": 42,
   "validator_max_new_tokens": 512,
   "strict_mode": false,
@@ -16,8 +16,8 @@
   "validator_max_tool_calls": 10,
   "checks": [],
   "agents": {
-    "bld": {"model": "qwen3:8b"},
-    "imp": {"model": "qwen3:8b"},
-    "tst": {"model": "qwen3:8b"}
+    "bld": {"model": "tree_fast"},
+    "imp": {"model": "tree_deepseek"},
+    "tst": {"model": "tree_strong"}
   }
 }

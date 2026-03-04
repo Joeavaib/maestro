@@ -52,30 +52,57 @@ class RunnerConfig:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "RunnerConfig":
+        # Load Model Registry if exists
+        registry_path = Path("models/registries.json")
+        registry = {}
+        if registry_path.exists():
+            try:
+                registry = json.loads(registry_path.read_text())
+            except Exception as e:
+                print(f"[!] Warning: Failed to load models/registries.json: {e}")
+
+        def resolve_model(m_name: str, backend: str) -> tuple[str, str]:
+            """Resolves model from registry if it exists."""
+            if m_name in registry:
+                reg_entry = registry[m_name]
+                new_name = reg_entry.get("model") or reg_entry.get("path") or m_name
+                new_backend = reg_entry.get("backend") or backend
+                return new_name, new_backend
+            return m_name, backend
+
         ollama_timeout_s = int(raw.get("ollama_timeout_s", 300))
         if ollama_timeout_s <= 0:
             raise ValueError("ollama_timeout_s must be > 0")
 
         checks = [CommandCheck(**item) for item in raw.get("checks", [])]
+        
+        # Initial backend/model for validation
+        v_backend = raw.get("validator_backend", "ollama")
+        v_model = raw.get("validator_model")
+        if not v_model:
+            raise ValueError("validator_model is required")
+            
+        # Resolve validator model via registry
+        v_model, v_backend = resolve_model(v_model, v_backend)
+
         agents: dict[str, AgentConfig] = {}
-        for code, cfg in raw.get("agents", {}).items():
+        for code, agent_raw in raw.get("agents", {}).items():
             if not (2 <= len(code) <= 4 and code.islower()):
                 raise ValueError(f"Invalid agent code: {code}")
-            agents[code] = AgentConfig(**cfg)
+            
+            # Resolve each agent model via registry
+            a_model, _ = resolve_model(agent_raw.get("model", ""), "ollama")
+            agent_raw["model"] = a_model
+            agents[code] = AgentConfig(**agent_raw)
 
         if bool(raw.get("parallel_decompose", False)):
             raise ValueError("parallel_decompose is not supported in this build; execution is sequential only")
 
-        validator_backend = raw.get("validator_backend", "ollama")
-        if validator_backend not in {"ollama", "hf"}:
-            raise ValueError("validator_backend must be ollama or hf")
-
-        validator_model = raw.get("validator_model")
-        if not validator_model:
-            raise ValueError("validator_model is required")
+        if v_backend not in {"ollama", "hf"}:
+            raise ValueError(f"validator_backend must be ollama or hf (got {v_backend})")
 
         validator_adapter_path = raw.get("validator_adapter_path")
-        if validator_backend == "hf" and not validator_adapter_path:
+        if v_backend == "hf" and not validator_adapter_path:
             raise ValueError("validator_adapter_path is required when validator_backend=hf")
 
         validator_max_new_tokens = max(1, min(2048, int(raw.get("validator_max_new_tokens", 512))))
@@ -83,8 +110,8 @@ class RunnerConfig:
         cfg = cls(
             ollama_host=raw.get("ollama_host", "http://127.0.0.1:11434"),
             ollama_timeout_s=ollama_timeout_s,
-            validator_backend=validator_backend,
-            validator_model=validator_model,
+            validator_backend=v_backend,
+            validator_model=v_model,
             validator_adapter_path=validator_adapter_path,
             validator_seed=raw.get("validator_seed"),
             validator_max_new_tokens=validator_max_new_tokens,

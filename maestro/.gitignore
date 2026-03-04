@@ -49,6 +49,9 @@ Ansprüche.md
 
 # Archivals and Experiments
 experiments/
+models/*
+!models/registries.json
+!models/.gitkeep
 tmp/
 temp/
 *.log
