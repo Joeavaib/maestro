@@ -5,9 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "maestro"
 version = "0.1.0"
-description = "TMP-S v2.4 coding orchestra on Ollama"
+description = "TMP-S Lite coding orchestra on Ollama"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "torch",
+    "transformers",
+    "peft",
+    "bitsandbytes>=0.44.0",
+    "accelerate",
+    "tqdm",
+    "requests"
+]
 
 [project.scripts]
 maestro = "maestro.cli:main"

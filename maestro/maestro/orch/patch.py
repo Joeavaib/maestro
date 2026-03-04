@@ -17,7 +17,12 @@ def _reject_unsafe_diff(diff: str, allow_renames: bool = False) -> str | None:
     return None
 
 
-def apply_diff(repo: Path, diff: str, allow_renames: bool = False) -> dict:
+def apply_diff(repo: Path, diff: str, allow_renames: bool = False, focus: str = None) -> dict:
+    # If header is missing but we have a hunk start and a focus file, prepend synthetic header
+    if diff.startswith("@@ -") and focus and focus != "*" and "," not in focus:
+        header = f"--- a/{focus}\n+++ b/{focus}\n"
+        diff = header + diff
+
     reason = _reject_unsafe_diff(diff, allow_renames)
     if reason:
         return {"ok": False, "error": reason}
@@ -41,7 +46,16 @@ def apply_file_blocks(repo: Path, payload: str) -> dict:
         if repo.resolve() not in target.parents and target != repo.resolve():
             return "path traversal"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("\n".join(buf).rstrip("\n") + "\n")
+
+        # Strip markdown fences if present
+        clean_buf = []
+        in_fence = False
+        for i, line in enumerate(buf):
+            if line.startswith("```"):
+                continue
+            clean_buf.append(line)
+
+        target.write_text("\n".join(clean_buf).rstrip("\n") + "\n")
         return None
 
     for line in payload.splitlines():

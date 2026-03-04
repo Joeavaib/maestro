@@ -43,6 +43,7 @@ class RunnerConfig:
     allow_renames: bool = False
     parallel_decompose: bool = False  # reserved; current runtime is strictly sequential
     validator_input_cap: int = 24000
+    validator_max_tool_calls: int = 3
 
     @classmethod
     def from_json_file(cls, path: str | Path) -> "RunnerConfig":
@@ -77,7 +78,7 @@ class RunnerConfig:
         if validator_backend == "hf" and not validator_adapter_path:
             raise ValueError("validator_adapter_path is required when validator_backend=hf")
 
-        validator_max_new_tokens = max(1, min(512, int(raw.get("validator_max_new_tokens", 512))))
+        validator_max_new_tokens = max(1, min(2048, int(raw.get("validator_max_new_tokens", 512))))
 
         cfg = cls(
             ollama_host=raw.get("ollama_host", "http://127.0.0.1:11434"),
@@ -97,6 +98,7 @@ class RunnerConfig:
             allow_renames=bool(raw.get("allow_renames", False)),
             parallel_decompose=False,
             validator_input_cap=int(raw.get("validator_input_cap", 24000)),
+            validator_max_tool_calls=int(raw.get("validator_max_tool_calls", 3)),
         )
 
         if cfg.execution_mode not in {"sandboxed", "unsafe-local"}:

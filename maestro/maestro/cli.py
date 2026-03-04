@@ -6,6 +6,7 @@ from pathlib import Path
 from maestro.config import RunnerConfig
 from maestro.llm import build_specialist_client, build_validator_client
 from maestro.orch.orchestrator import Orchestrator
+from maestro.orch.forest_orchestrator import ForestOrchestrator
 
 
 def main() -> None:
@@ -17,6 +18,7 @@ def main() -> None:
     run.add_argument("--cfg", required=True)
     run.add_argument("--sandboxed", action="store_true")
     run.add_argument("--unsafe-local", action="store_true")
+    run.add_argument("--forest", action="store_true", help="Use the new Raven/Luna/Trees architecture")
 
     args = parser.parse_args()
     if args.cmd == "run":
@@ -30,11 +32,18 @@ def main() -> None:
         req_path = Path(req_arg)
         request_text = req_path.read_text() if req_path.exists() else req_arg
 
-        orch = Orchestrator(
-            cfg,
-            llm_client=build_specialist_client(cfg),
-            validator_client=build_validator_client(cfg),
-        )
+        if args.forest:
+            orch = ForestOrchestrator(
+                cfg,
+                llm_client=build_specialist_client(cfg),
+                validator_client=build_validator_client(cfg),
+            )
+        else:
+            orch = Orchestrator(
+                cfg,
+                llm_client=build_specialist_client(cfg),
+                validator_client=build_validator_client(cfg),
+            )
         result = orch.run(Path(args.repo), request_text)
         print(result)
 
