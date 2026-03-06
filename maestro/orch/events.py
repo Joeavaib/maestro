@@ -1,9 +1,12 @@
-class Event:
-    def __init__(self, type: str, payload: dict):
-        self.type = type
-        self.payload = payload
+from dataclasses import dataclass
+from typing import Dict
 
-    def as_dict(self) -> dict:
+@dataclass
+class Event:
+    type: str
+    payload: Dict[str, any]
+
+    def as_dict(self) -> Dict[str, any]:
         return {
             'type': self.type,
             'payload': self.payload
