@@ -17,6 +17,7 @@ from maestro.tmps.parser import LiteParser
 from maestro.orch.validator_tools import ValidatorTools, ToolResult
 from maestro.llm.prompts import VALIDATOR_SYSTEM_PROMPT_WITH_TOOLS, build_validator_feedback
 from maestro.orch.context import build_validator_input, build_specialist_context, parse_tool_call
+from maestro.orch.discovery import discover_checks
 
 MAX_TMPS_RETRIES = 2
 
@@ -41,6 +42,14 @@ class Orchestrator:
         sid, runid = run["sid"], run["runid"]
         run_root, work_repo = run["run_root"], run["work_repo"]
         store.clone_repo_to_work(work_repo)
+
+        # 0. DISCOVERY: Auto-detect checks if none provided
+        if not self.cfg.checks:
+            detected = discover_checks(work_repo)
+            if detected:
+                print(f"[*] Auto-discovered {len(detected)} validation checks: {[c.name for c in detected]}")
+                self.cfg.checks = detected
+        
         logger = RunLogger(run_root)
         
         # Initialize Tools

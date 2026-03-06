@@ -1,85 +1,80 @@
-# 🦅 The Forest Architecture: Raven, Luna & The Trees
+# 🦅 The Forest Architecture: Raven, Luna & The Trees (Evolution v2)
 
 Diese Vision beschreibt die Evolution des Orchestrierungssystems weg von einer starren, deterministischen State-Machine (TMP-S) hin zu einer dezentralen, asynchronen Agenten-Pipeline. Das Ziel ist es, "Validator Fatigue" zu eliminieren, Token-Kosten durch chirurgischen Kontext zu senken und die Erfolgsquote durch lokale Retry-Loops zu maximieren.
 
 ---
 
-## 🏗️ Das Trio-Konzept
+## 🏗️ Das Evolutions-Trio (Erkenntnisse & Upgrades)
 
-Das System teilt sich in drei hochspezialisierte Rollen auf, die sequenziell (und teilweise parallel) interagieren:
+Das System teilt sich in drei hochspezialisierte Rollen auf, die wir in jüngsten Testläufen signifikant geschärft haben:
 
 ### 1. 🦅 Raven (The Planner & Architect)
 **"Kräht in den Wald und gibt die Richtung vor."**
-*   **Verantwortung:** Versteht das übergeordnete Ziel des Users und zerlegt es in einen "Forest Plan" (eine Liste von unabhängigen Sub-Tasks).
-*   **Output:** Generiert pro Sub-Task präzise **Keywords & Intents** (z. B. "Schreibe die API-Route für User-Auth", "Optimiere die DB-Query in Zeile 40").
-*   **Vorteil:** Raven muss sich nicht mehr mit Syntax, Formatierungen (B-Lines, C-Lines) oder dem Managen von Retries herumschlagen. Raven ist rein strategisch.
+*   **Ist-Zustand:** Raven zerteilt Ziele in isolierte Nano-Tasks. Dies funktioniert hervorragend für lineare Feature-Erweiterungen.
+*   **Neue Erkenntnis:** Lineare Task-Listen scheitern bei globalen Refactorings (Der Domino-Effekt). Wenn Task 1 eine Core-API ändert, brechen Task 2-20.
+*   **Lösungsvorschlag (Vision v3):** Raven muss von einer flachen JSON-Liste zu einem **Directed Acyclic Graph (DAG)** wechseln. Tasks müssen Abhängigkeiten (`depends_on`) definieren. Erst wenn das "Database Core" (Task 1) kompiliert, dürfen die "Route Handlers" (Task 2 & 3) starten.
 
-### 2. 🧲 CXM (The Context Machine - Die Brücke)
-**"Sammelt den Boden für die Bäume."**
-*   **Integration:** Das externe Projekt `cxm` wird über einen optimierten CLI-Call eingebunden.
-*   **Der "Harvest"-Modus:** Statt eines interaktiven Dialogs nutzt das System einen direkten Call:
-    ```bash
-    cxm harvest "<Task-Keywords>" --intent "<Task-Intent>" --output-format "context-block"
-    ```
-*   **Funktion:** Dieser Befehl triggert das Hybrid-RAG in CXM. Es identifiziert die betroffenen Dateien im Hintergrund (`File Backgrounds`), extrahiert relevante Code-Snippets und formatiert sie als injizierbaren Kontext-Block.
-*   **Ergebnis:** Ein maßgeschneiderter, kontext-reicher aber token-effizienter Prompt für die Trees. Luna nimmt diesen Output und setzt ihn als "Background Info" über die eigentliche Coding-Aufgabe.
+### 2. 🌕 Luna (The Monitor, Triage & Orchestrator)
+**"Erleuchtet den Wald, überwacht die Ausführung und heilt Fehler."**
+*   **Ist-Zustand:** Luna überwacht die Ausführung (`Luna-Shield`) und fängt Endlosschleifen ab. Sie wählt dynamisch das richtige Worker-Modell (`Light`, `Medium`, `Heavy`) basierend auf Task-Komplexität und Retry-Stufe.
+*   **Neue Erkenntnis (Die "Gedächtnis-Brücke"):** Rohe Stacktraces überfordern kleine Worker-Modelle. 
+*   **Der Triage-Durchbruch:** Luna agiert nun als **Triage-Analyst**. Anstatt dem Tree einen 50-zeiligen Rust-Compiler-Error zuzuwerfen, analysiert der `luna_monitor` (ein schnelles 8b-Reasoning-Modell) den Fehler und extrahiert eine **chirurgische Fix-Instruktion** (z.B. "Der `#[arg]` Tag fehlt in `cli.rs`"). Der Tree erhält nur noch diese komprimierte Essenz.
 
----
-
-## 🛠️ Technische Umsetzung (Bash-Pipeline)
-
-Die Kommunikation zwischen Luna, CXM und den Trees erfolgt über standardisierte Unix-Pipes oder temporäre Artefakte:
-
-1.  **Raven-Plan extrahieren:**
-    `Raven` -> `forest_plan.json`
-2.  **Kontext-Harvesting (pro Task):**
-    ```bash
-    # Luna ruft CXM auf, um den Boden für Tree X zu bereiten
-    CONTEXT=$(cxm harvest "auth_logic.py, jwt_helper" --intent "add_refresh_token")
-    ```
-3.  **Tree-Injektion:**
-    Luna kombiniert den `CONTEXT` mit dem `Specialist-Prompt` und sendet ihn an das Coder-Modell (z.B. Qwen2.5-Coder oder DeepSeek-V3).
-4.  **Hook-Validierung:**
-    Luna führt den vom Tree generierten Code aus und validiert ihn gegen den `Hook` (z.B. `pytest tests/test_auth.py`).
-
-### 3. 🌕 Luna (The Monitor & Orchestrator)
-**"Erleuchtet den Wald, überwacht die Ausführung und initiiert Retries."**
-*   **Verantwortung:** Luna nimmt den Forest Plan von Raven (angereichert durch CXM) und delegiert ihn an die Trees. Sie ist die unerbittliche Wächterin der Qualität.
-*   **Hooks:** Luna definiert und überwacht die Erfolgskriterien (Hooks). Das können Unit-Tests, Linter-Checks, oder kleine semantische LLM-Prüfungen sein.
-*   **Lokale Retries:** Wenn ein Tree scheitert, meldet Luna den Fehler (Compiler-Error, Test-Fail) direkt an den Tree zurück und initiiert einen Retry (z.B. max 3 Versuche). 
-*   **Schutz:** Raven wird erst wieder kontaktiert, wenn Luna trotz aller Retries scheitert (Eskalation) oder die gesamte Kette erfolgreich durchlaufen wurde.
-
-### 4. 🧠 Dynamische Spezialisierung (Vision)
-Um die Effizienz zu maximieren, werden Worker (Trees) nicht nur nach Komplexität, sondern nach **Domänen-Kompetenz** zugewiesen:
-*   **Sicherheitsrelevante Module:** Einsatz von Reasoning-Monstern wie `GLM-4.7-Flash-Claude` für Deep-Reasoning und Schwachstellen-Analyse.
-*   **Performance & Core Logic:** `DeepSeek-Coder-V2` als spezialisierter Worker für hocheffizienten, algorithmischen Code.
-*   **Boilerplate & UI:** Leichtere Modelle wie `Qwen-Coder` für schnelle Iterationen.
-
-Luna erkennt das Zielmodul und wählt den passenden "Spezial-Tree" aus der Registry.
-
-### 4. 🌲 The Trees (The Specialist Coders)
+### 3. 🌲 The Trees (The Specialist Coders)
 **"Wachsen im Wald und erledigen die Arbeit."**
-*   **Verantwortung:** Reine Ausführung. Ein Tree ist ein Coder-LLM, das den durch CXM perfekten Prompt (Aufgabe + Dateikontext) erhält.
-*   **Vervielfältigung (Parallelisierung):** Für komplexe Hooks kann Luna mehrere Trees (verschiedene Modelle oder verschiedene Temperaturen) *parallel* spawnen. Der Tree, der den Hook als Erster erfolgreich passiert, gewinnt (MCTS-ähnlicher Ansatz).
-*   **Fokus:** Trees müssen das Gesamtprojekt nicht kennen. Sie schreiben nur die Funktion, die verlangt wird, und reparieren sie basierend auf Lunas Fehlermeldungen.
+*   **Ist-Zustand:** Rein auf Ausführung getrimmte Modelle, die streng gezwungen werden, `<rationale>` Tags vor dem Code zu schreiben, um "Chain-of-Thought" zu erzwingen (selbst bei Non-Reasoning Modellen).
+*   **Neue Erkenntnis:** Modelle leiden an kreativer Formatierungs-Wut (erfinden `<File>`, `[file]`, etc.). Der Parser muss kugelsicher sein, und das System-Prompting extrem restriktiv.
+*   **Das Rescue-Team:** Wenn ein Medium-Tree dreimal scheitert, eskalieren wir an den **Heavy-Planner (Phi4)**. Dieser bekommt von Luna ein "Rescue Briefing" (inkl. Triage-Analyse) und baut einen deterministischen Bauplan für den Heavy-Worker (`TeichAI/Qwen3-14B`).
+
+### 4. 🧲 CXM (The Context Machine - Intelligent Harvesting)
+**"Sammelt gezielt, was fehlt."**
+*   **Ist-Zustand:** CXM sucht basierend auf initialen Keywords.
+*   **Die Evolution (Dynamic Harvesting):** Bei einem Fehler generiert Luna eine **neue, maßgeschneiderte Suchanfrage** für CXM, basierend auf dem Fehler. Wenn der Tree ein Trait nicht findet, sucht CXM gezielt nach der Definition dieses Traits in der Codebase, um das "Rescue Team" mit dem fehlenden Wissen zu versorgen.
 
 ---
 
-## 🔄 Der Workflow (Beispiel)
+## 🚀 Roadmap to "Full Dev": Mastering the Modern Stack
 
-1. **User Request:** "Mach die Funktion X schneller und thread-safe."
-2. **Raven Plan:** 
-   - Task 1: Lock-Mechanismus in `x.py` einbauen (Keywords: "Thread lock, mutex").
-   - Task 2: Schleife in `x.py` vektorisieren (Keywords: "Optimize loop, numpy").
-3. **CXM Contexting:** Das System holt via `cxm` für Task 1 & 2 exakt die relevanten Klassen aus `x.py` und den dazugehörigen Tests.
-4. **Luna Delegation:** Luna startet Tree A für Task 1 und Tree B für Task 2.
-5. **Tree Execution & Hooks:** 
-   - Tree A liefert Code. Luna checkt den Hook (Linting + Run Test). Test schlägt fehl (Deadlock).
-   - Luna gibt Fehler an Tree A zurück (Retry 1/3). Tree A repariert. Hook passt.
-6. **Completion:** Luna meldet an Raven: "Wald erfolgreich gewachsen."
+Um von isolierten Single-File Änderungen zu kompletten, skalierbaren Applikationen zu kommen, fokussieren wir die Entwicklung auf drei strategische Säulen:
 
-## 🎯 Warum dieses Design?
+### 1. Die Technologische Speerspitze
+Wir meistern Stacks, die Typsicherheit und deterministische Validierung fördern:
+*   **Rust (Backend & CLI):** Nutzung von `axum`, `tokio` und `sqlx`. Der Rust-Compiler ist unser bester Lehrer für präzise Luna-Triage.
+*   **Python 3.12+ (Logic & Data):** Einsatz von `FastAPI`, `Pydantic v2` und `SQLAlchemy 2.0`. Fokus auf **Dependency Injection**, um Trees maximale Isolation zu ermöglichen.
+*   **TypeScript & Next.js 15 (Frontend):** Typsichere Brücken zwischen UI und API.
 
-*   **Keine Validator-Fatigue:** Das Architekten-Modell (Raven) ermüdet nicht an Formatierungs-Fehlern.
-*   **Skalierbarkeit:** Durch die Trees lassen sich Aufgaben hervorragend parallelisieren.
-*   **Präzision durch CXM:** Die Einbindung der ContextMachine löst das Halluzinations- und Token-Limit-Problem der Arbeiter-Agenten. Jeder Tree bekommt genau die Dateien, die er braucht.
+### 2. Architektonische Meilensteine (Patterns)
+Full Dev erfordert, dass Raven nicht nur "Code" plant, sondern "Architektur":
+*   **Schema-First Design:** Raven plant immer zuerst das Datenmodell (Contract), bevor die Logik-Trees starten.
+*   **Test-Driven Development (TDD):** Einführung von **Semantic Assertion Tasks**. Ein Feature-Task gilt erst als abgeschlossen, wenn der zugehörige (parallel oder vorab erstellte) Test-Task "Grün" meldet.
+*   **DevOps Integration:** Automatisches Planen von `Dockerfiles`, `GitHub Actions` und Datenbank-Migrationen (`Alembic`/`Prisma`).
+
+### 3. Full Dev Workflow (Beispiel)
+Ein typischer Forest-Plan für eine neue Applikation sieht künftig so aus:
+1.  **Contract-Task:** Definiere API-Schema & DB-Models (Pydantic/Rust Structs).
+2.  **Infrastructure-Task:** Erstelle Docker-Setup & Migrations-Skelett.
+3.  **Assertion-Task:** Schreibe fehlgeschlagene Integrationstests (TDD).
+4.  **Feature-Tasks:** Implementiere die Logik in isolierten Schichten.
+5.  **Validation-Task:** Luna prüft den "Linker-Status" (Sind alle neuen Files im Projekt-Root registriert?).
+
+---
+
+## 🚧 Aktuelle Grenzen & Lösungsvorschläge (Vision v3)
+
+### 1. Semantische Endlosschleifen ("Blind-Spot" Bugs)
+*   **Problem:** Code kompiliert (`cargo check` grün), tut aber logisch das Falsche. 
+*   **Lösung:** **Semantic Assertion Tasks** (siehe oben). Luna darf einen Feature-Task erst als "A" werten, wenn der zugehörige Test-Task "Grün" meldet.
+
+### 2. Projekt-übergreifendes Datei-Management
+*   **Problem:** Trees vergessen oft Module in Wurzel-Dateien einzutragen (z.B. `mod scanner;`).
+*   **Lösung:** Luna führt nach jedem Patch einen **"Linker-Check"** durch. Wenn eine neue Datei vom AST nicht erfasst wird, triggert Luna automatisch einen "Linker-Task".
+
+### 3. Starre Linearität verhindert echten Speed
+*   **Problem:** Luna iteriert streng sequenziell.
+*   **Lösung:** Sobald Raven den DAG (Directed Acyclic Graph) implementiert hat, wird Lunas Kernschleife parallelisiert. Unabhängige Tasks werden gleichzeitig an verschiedene Ollama-Instanzen gesendet.
+
+---
+
+## 🎯 Warum dieses Design gewinnt
+
+Durch die **Kompaktierung des Fehlerkontexts**, das **gezielte RAG (CXM)** und den Fokus auf **Schema-First Architektur** halten wir den "Noise" im Prompt minimal. Die kleinen Trees bleiben schnell und fokussiert, während die großen Reasoning-Modelle nur dann Rechenzeit beanspruchen, wenn echte analytische Rettungsarbeit nötig ist. Das ist die perfekte Balance aus Speed und Tiefe auf dem Weg zum Full Dev Agenten.

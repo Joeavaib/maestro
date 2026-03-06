@@ -1,0 +1,41 @@
+{
+  "ollama_host": "http://127.0.0.1:8000",
+  "ollama_timeout_s": 300,
+  "validator_backend": "vllm",
+  "specialist_backend": "vllm",
+  "validator_model": "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ",
+  "validator_seed": 42,
+  "validator_max_new_tokens": 1024,
+  "strict_mode": false,
+  "max_retries": 3,
+  "abs_max_turns": 8,
+  "execution_mode": "unsafe-local",
+  "apply_to_repo": true,
+  "allow_renames": false,
+  "parallel_decompose": false,
+  "validator_input_cap": 24000,
+  "validator_max_tool_calls": 10,
+  "checks": [],
+  "registry": {
+    "luna_monitor": {
+      "backend": "vllm",
+      "model": "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ",
+      "thinking": false
+    },
+    "tree_light": {
+      "backend": "vllm",
+      "model": "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ",
+      "thinking": false
+    },
+    "tree_heavy_worker": {
+      "backend": "vllm",
+      "model": "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ",
+      "thinking": false
+    },
+    "tree_heavy_planner": {
+      "backend": "vllm",
+      "model": "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ",
+      "thinking": false
+    }
+  }
+}

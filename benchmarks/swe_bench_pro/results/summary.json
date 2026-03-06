@@ -1,0 +1,9 @@
+[
+  {
+    "instance_id": "instance_NodeBB__NodeBB-04998908ba6721d64eba79ae3b65a351dcfbc5b5-vnan",
+    "maestro_decision": "E",
+    "resolved": false,
+    "run_root": "/home/joe/Dokumente/projects/Apps/maestro/benchmarks/swe_bench_pro/work/instance_NodeBB__NodeBB-04998908ba6721d64eba79ae3b65a351dcfbc5b5-vnan/runs/dg/wlabhf8ms1ue",
+    "patch_path": "/home/joe/Dokumente/projects/Apps/maestro/benchmarks/swe_bench_pro/work/instance_NodeBB__NodeBB-04998908ba6721d64eba79ae3b65a351dcfbc5b5-vnan/runs/dg/wlabhf8ms1ue/final/final_patch.diff"
+  }
+]

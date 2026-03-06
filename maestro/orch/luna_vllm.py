@@ -19,21 +19,16 @@ You do not converse, apologize, or explain beyond the required <rationale> block
 1. You must solve ONLY the task requested in the <primary_directive>.
 2. Respect all rules in <strict_constraints> absolutely.
 3. NEVER repeat or summarize the <error_triage> block. Focus only on the solution.
-4. Output format MUST be one of the following:
-   OPTION A (For small files or total rewrites):
+4. Output format MUST be EXACTLY:
    FILE: path/to/target.py
    <entire file content here>
-
-   OPTION B (For small changes in massive files to save token budget):
-   Provide a standard Unified Diff (diff --git). Ensure context lines are 100% accurate.
-
-5. DO NOT use XML tags like <File>. Use ONLY "FILE: " followed by the path if using Option A.
+5. DO NOT use XML tags like <File>. Use ONLY "FILE: " followed by the path.
 6. DO NOT use markdown code fences (```) around the FILE block header itself.
 7. ALL text, rationale, and code comments MUST be written strictly in English.
 </strict_rules>
 """
 
-class Luna:
+class LunaVLLM:
     """
     Luna acts as the Monitor and Orchestrator.
     She iterates over the ForestPlan, invokes CXM for context,
@@ -199,7 +194,6 @@ class Luna:
 
     def _run_tree_with_retries(self, repo_path: Path, task: TreeTask) -> bool:
         import subprocess
-        import re
         """Runs the worker model and checks the hooks, up to max_retries."""
         
         context_block = ""
@@ -210,7 +204,8 @@ class Luna:
             # Dynamic Model Selection
             current_model, reg_key = self._get_dynamic_model(task.complexity, attempt)
             
-            # If the model tier changed, we clear the compact error
+            # If the model tier changed, we clear the compact error to prevent "context poisoning"
+            # of the new, more capable model by the failures of the previous one.
             if last_reg_key and reg_key != last_reg_key:
                 print(f"[🌕 Luna] Escalating to '{reg_key}'. Clearing previous error context.")
                 compact_error = ""
@@ -219,26 +214,12 @@ class Luna:
             subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=repo_path, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=repo_path, capture_output=True)
 
-            # 1. CONTEXT HARVESTING (Now with refined XML support)
-            if attempt > 0 or "cxm" in task.tools:
-                refined_query = self._generate_cxm_query(task, compact_error if attempt > 0 else "")
-                raw_harvest = self.cxm.harvest(refined_query, task.intent)
-                
-                # Extract content between XML markers if present
-                harvest_match = re.search(r"<!-- CXM HARVEST START -->(.*?)<!-- CXM HARVEST END -->", raw_harvest, re.DOTALL)
-                if harvest_match:
-                    context_block = harvest_match.group(1).strip()
-                else:
-                    context_block = raw_harvest.strip()
-                
-                # Path Sanitization: CXM might still index redundant 'maestro/maestro/' paths
-                # We normalize these to the new flat structure.
-                context_block = context_block.replace('path="maestro/maestro/', 'path="maestro/')
-                
-                if context_block:
-                    print(f"[🌕 Luna] Successfully injected {len(context_block)} chars of project context.")
-            else:
-                context_block = ""
+            # 1. CONTEXT HARVESTING (DISABLED FOR TESTING)
+            # if attempt > 0 or "cxm" in task.tools:
+            #    refined_query = self._generate_cxm_query(task, compact_error if attempt > 0 else "")
+            #    print(f"[🌕 Luna] Refined CXM Query: '{refined_query}'")
+            #    context_block = self.cxm.harvest(refined_query, task.intent)
+            context_block = "" # Forced empty for context diet
 
             # 2. RESCUE CONFIGURATION (For Heavy/Recovery Team)
             is_rescue = (reg_key == "tree_heavy_worker") or (task.complexity >= 4 and attempt > 0)
@@ -317,21 +298,28 @@ class Luna:
             # Generate Code
             options = {
                 "temperature": 0.1,
-                "top_p": 0.9,
-                "repeat_penalty": 1.15
+                "min_p": 0.05,
+                "top_p": 1.0, # min_p is preferred now
+                "repeat_penalty": 1.1, # Will be mapped to frequency/presence penalty
+                "stop": ["</rationale>\n\n<rationale>", "[/FILE]"]
             }
             
             skip_strip = False
             if reg_key and not is_rescue:
                 skip_strip = self.cfg.get_registry_flag(reg_key, "thinking", False)
 
+            # Strict Protocol Harness: Forces <rationale>...</rationale> followed by one or more FILE: blocks
+            # This regex is a high-level guide for vLLM's FSM
+            strict_regex = r"<rationale>\n?[\s\S]+?\n?</rationale>\n\n(FILE: [^\n]+\n[\s\S]+)+"
+            
             output = self.llm.generate(
                 model=current_model,
                 prompt=prompt,
                 options=options,
                 system=TREE_SYSTEM_PROMPT,
                 keep_alive=0,
-                skip_strip_thinking=skip_strip
+                skip_strip_thinking=skip_strip,
+                guided_regex=strict_regex
             )
             
             print(f"[🌲 Tree] Received {len(output)} chars from '{current_model}'. Parsing...")

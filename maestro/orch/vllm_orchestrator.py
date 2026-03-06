@@ -7,11 +7,11 @@ from maestro.config import RunnerConfig
 from maestro.log import RunLogger
 from maestro.store import RunStore
 from maestro.orch.raven import Raven
-from maestro.orch.luna import Luna
+from maestro.orch.luna_vllm import LunaVLLM
 from maestro.orch.forest_types import CXMBridge
 from maestro.orch.discovery import discover_checks
 
-class ForestOrchestrator:
+class VLLMOrchestrator:
     """
     The new pipeline replacing TMPS-Lite.
     Architecture: Raven (Plan) -> CXM (Context) -> Luna (Monitor/Tree Execution).
@@ -42,9 +42,9 @@ class ForestOrchestrator:
         
         cxm_bridge = CXMBridge(str(work_repo))
         
-        luna = Luna(self.cfg, self.llm, cxm_bridge)
+        luna = LunaVLLM(self.cfg, self.llm, cxm_bridge)
         
-        print(f"\\n[🌳 Forest Pipeline] Starting run in {work_repo}")
+        print(f"\\n[🌳 vLLM Pipeline] Starting run in {work_repo}")
         
         # 1. RAVEN: Strategic Planning
         plan = raven.plan(request_text)

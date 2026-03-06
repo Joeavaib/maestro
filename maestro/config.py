@@ -105,8 +105,8 @@ class RunnerConfig:
         if bool(raw.get("parallel_decompose", False)):
             raise ValueError("parallel_decompose is not supported in this build; execution is sequential only")
 
-        if v_backend not in {"ollama", "hf"}:
-            raise ValueError(f"validator_backend must be ollama or hf (got {v_backend})")
+        if v_backend not in {"ollama", "hf", "vllm"}:
+            raise ValueError(f"validator_backend must be ollama, hf, or vllm (got {v_backend})")
 
         validator_adapter_path = raw.get("validator_adapter_path")
         if v_backend == "hf" and not validator_adapter_path:
