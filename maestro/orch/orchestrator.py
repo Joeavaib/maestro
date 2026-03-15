@@ -216,7 +216,7 @@ class Orchestrator:
                 current_input,
                 options=self._validator_options(),
                 system=VALIDATOR_SYSTEM_PROMPT_WITH_TOOLS,
-                keep_alive="0s"
+                keep_alive="5m"
             )
             
             # Is it a tool call?
@@ -276,5 +276,5 @@ class Orchestrator:
         model = cfg.model if cfg else self.cfg.validator_model
         options = {"temperature": cfg.temperature if cfg else 0.0, "top_p": cfg.top_p if cfg else 1.0}
         if cfg: options["num_ctx"] = cfg.num_ctx
-        return self.llm.generate(model, prompt, options=options, keep_alive="0s")
+        return self.llm.generate(model, prompt, options=options, keep_alive="5m")
 

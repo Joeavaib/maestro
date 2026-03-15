@@ -64,12 +64,6 @@ class HFClient:
             self._MODEL_CACHE[cache_key] = (tokenizer, loaded_model)
             return tokenizer, loaded_model
 
-    @staticmethod
-    def _build_prompt(prompt: str, system: str | None = None) -> str:
-        if system:
-            return f"{system}\n\n{prompt}"
-        return prompt
-
     def generate(self, model: str, prompt: str, options: dict | None = None, system: str | None = None, skip_strip_thinking: bool = False) -> str:
         tokenizer, loaded_model = self._load_model(model)
         opts = dict(options or {})

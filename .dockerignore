@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+.env
+
+# Maestro specific
+.maestro/
+runs/
+*.log
+*.tmp
+temp/
+tmp/
+experiments/
+
+# WebUI / Node
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+
+# Git
+.git/
+.gitignore
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

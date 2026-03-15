@@ -32,20 +32,21 @@ class OllamaClient:
         self.host = host.rstrip("/")
         self.timeout_s = timeout_s
 
-    def generate(self, model: str, prompt: str, options: dict | None = None, system: str | None = None, keep_alive: str | int | None = 0, skip_strip_thinking: bool = False) -> str:
+    def generate(self, model: str, prompt: str, options: dict | None = None, system: str | None = None, keep_alive: str | int | None = "5m", skip_strip_thinking: bool = False) -> str:
         import sys
         
-        # Prepend system prompt to the main prompt to ensure compatibility
-        full_prompt = prompt
-        if system:
-            full_prompt = f"{system}\n\n{prompt}"
-            
         # Define stop sequences to force end of generation
         stop_seqs = ["</rationale>\n\n<rationale>", "[/FILE]", "###", "Previous Attempt"]
+        
+        # Build messages for Chat API
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
             
         payload = {
             "model": model, 
-            "prompt": full_prompt, 
+            "messages": messages, 
             "stream": True,
             "options": options or {}
         }
@@ -56,14 +57,14 @@ class OllamaClient:
         if keep_alive is not None:
             payload["keep_alive"] = keep_alive
             
-        print(f"[*] Ollama: model={model} keep_alive={keep_alive}")
+        print(f"[*] Ollama: model={model} (Chat API) keep_alive={keep_alive}")
         
         response_text = ""
         loop_detected = False
         
         try:
-            # First try Ollama endpoint (/api/generate)
-            url = f"{self.host}/api/generate"
+            # First try Ollama Chat endpoint (/api/chat)
+            url = f"{self.host}/api/chat"
             with requests.post(
                 url,
                 json=payload,
@@ -71,19 +72,17 @@ class OllamaClient:
                 stream=True
             ) as resp:
                 if resp.status_code == 404:
-                    # Fallback for native llama-server or OpenAI-style backends
-                    print(f"[*] /api/generate not found. Falling back to OpenAI completions...")
-                    # Transform payload for OpenAI
+                    # Fallback for OpenAI-style chat completions
+                    print(f"[*] /api/chat not found. Falling back to OpenAI chat completions...")
                     openai_payload = {
                         "model": model,
-                        "prompt": full_prompt,
+                        "messages": messages,
                         "stream": True,
                         "stop": stop_seqs,
-                        "max_tokens": 4096,
                         "temperature": 0.2
                     }
                     resp = requests.post(
-                        f"{self.host}/v1/completions",
+                        f"{self.host}/v1/chat/completions",
                         json=openai_payload,
                         timeout=self.timeout_s,
                         stream=True
@@ -97,15 +96,15 @@ class OllamaClient:
                     if line:
                         line_str = line.decode('utf-8')
                         if line_str.startswith("data: "):
-                            # Handle OpenAI Server-Sent Events (SSE)
+                            # Handle OpenAI Server-Sent Events (SSE) for Chat
                             chunk_data = line_str[6:].strip()
                             if chunk_data == "[DONE]": break
                             chunk = json.loads(chunk_data)
-                            token = chunk.get("choices", [{}])[0].get("text", "")
+                            token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
                         else:
-                            # Standard Ollama JSON lines
+                            # Standard Ollama Chat JSON lines
                             chunk = json.loads(line)
-                            token = chunk.get("response", "")
+                            token = chunk.get("message", {}).get("content", "")
                             
                         response_text += token
                         

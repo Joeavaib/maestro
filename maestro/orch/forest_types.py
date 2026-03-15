@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 import subprocess
-import json
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 @dataclass
 class TreeTask:
     id: str
-    description: str
-    intent: str
-    keywords: str
-    target_files: str
-    tools: List[str] = field(default_factory=list)
-    validation_command: Optional[str] = None
-    complexity: int = 2  # 1=Trivial, 2=Normal, 3=Complex, 4=Expert
+    task: str           # Formerly description
+    files: str          # Formerly target_files
+    symbols: str        # Specific functions/classes to touch
+    intent: str         # Feature | Refactor | Bugfix | Docs | Test
+    complexity: int = 2 # 1=Trivial, 2=Normal, 3=Complex, 4=Expert
+    tools: List[str] = field(default_factory=list) # e.g. ["cxm"]
     potential_pitfalls: Optional[str] = None
     constraints: Optional[str] = None
 

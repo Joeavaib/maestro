@@ -1,55 +1,23 @@
+"""
+This module contains the Raven class, which serves as the strategic planner in the Forest architecture.
+The RAVEN_SYSTEM_PROMPT is optimized using the 'Gravitational Pull Model' to ensure maximum stability 
+and deterministic JSON output on small 7B-14B local models.
+"""
 from __future__ import annotations
 
 import json
 from typing import Optional
 
 from maestro.orch.forest_types import ForestPlan, TreeTask
+from maestro.orch.plan_filters import filter_raven_plan, merge_similar_tasks
 
-RAVEN_SYSTEM_PROMPT = """You are Raven, the master architect.
-Your job is to analyze the user's request and break it down into a Forest Plan.
-A Forest Plan is a sequence of isolated, independent coding tasks (Trees).
-
-TOKEN BUDGET & COMPLEXITY WARNING:
-- Local LLM workers (Trees) have strict token limits and lose focus on massive files.
-- NEVER assign a single task to modify more than 2 files at once.
-- If a request requires changes across a large architecture, you MUST sequence it into smaller, atomic micro-tasks (e.g., Task 1: Update DB Schema, Task 2: Update Backend Route, Task 3: Update Frontend API call).
-- If a target file is known to be massive, instruct the worker via `constraints` to only focus on the specific function.
-
-For each task, provide:
-- id: A short unique identifier (e.g. "task_1")
-- description: Clear instruction for the Coder LLM what to do.
-- intent: A short string defining the intent (e.g., "Refactor", "Feature", "Bugfix").
-- keywords: Comma-separated keywords representing the core logic and files needed.
-- target_files: The main files this task will likely modify.
-- potential_pitfalls: (Optional) Anticipated edge cases, logic traps, or architectural risks (e.g., "Watch out for race conditions when saving").
-- constraints: (Optional) Strict boundaries to prevent scope creep (e.g., "Do not modify session.py", "No new dependencies").
-- tools: A list of strings specifying required tools. Available tools:
-  - "cxm": Fetches deep project context via RAG. CRITICAL RULE: You MUST include "cxm" for ANY task that modifies an EXISTING file, otherwise the Coder will hallucinate the business logic. Omit only when creating completely new, independent files.
-- validation_command: (Optional) A specific shell command to validate this task (e.g., "python3 -m py_compile module.py" or "pytest test_module.py"). If omitted, global checks will run. Use this to avoid running global integration tests on partial/transitional refactoring steps.
-- complexity: An integer from 1 to 4 defining how hard the task is. 1 = Trivial (formatting, pure boilerplate). 2 = Normal (standard logic, single file). 3 = Complex (tricky logic, deep regex, algorithms). 4 = Expert (massive refactoring, highly coupled architectural shifts).
-
-CRITICAL: ALL text, descriptions, and outputs MUST be written strictly in English.
-
-Respond ONLY with valid JSON. No markdown formatting, no explanations, no extra brackets.
-Ensure the JSON is strictly valid and ends with exactly one closing brace `}`.
-
-Example Output:
+RAVEN_SYSTEM_PROMPT = """Role: Architect.
+Task: Map request to execution JSON. Break down by component.
+Scope: Target explicit files and symbols. Interfaces first, implementation second.
+Format:
 {
-  "goal": "Make the database connection thread-safe",
-  "tasks": [
-    {
-      "id": "task_1",
-      "description": "Add a mutex lock to the db_connect function.",
-      "intent": "Bugfix",
-      "keywords": "db.py, connection, mutex, lock",
-      "target_files": "db.py",
-      "potential_pitfalls": "Ensure the lock is released even if an exception occurs.",
-      "constraints": "Do not change the public API signature of db_connect.",
-      "tools": ["cxm"],
-      "validation_command": "python3 -m py_compile db.py",
-      "complexity": 2
-    }
-  ]
+  "goal": "Summary",
+  "tasks": [{"id": "t1", "task": "Action", "files": "path", "symbols": "Name", "intent": "Feature", "complexity": 1, "tools": []}]
 }
 """
 
@@ -64,22 +32,22 @@ class Raven:
         self.cfg = cfg
 
     def plan(self, request_text: str) -> ForestPlan:
-        print("[🦅 Raven] Analyzing request and creating Forest Plan...")
+        print("[🦅 Raven] Analyzing request and creating Forest Plan (Modular Architect)...")
         
-        prompt = f"User Request:\n{request_text}\n\nGenerate the Forest Plan as JSON."
+        prompt = (
+            "[USER REQUEST]\n"
+            f"{request_text}\n\n"
+            "[PLAN]\n"
+            "{\n"
+            '  "goal": "'
+        )
         
         # We use a low temperature for deterministic planning
         options = {"temperature": 0.1, "top_p": 0.9}
         
-        # Check thinking flag for the model in registry
-        # The raven_model in forest_orchestrator is actually a resolved model name/path, 
-        # but the key in registry is usually 'raven_primary'. 
-        # However, cfg.validator_model might be the key itself before resolution or the resolved name.
-        # Let's try to find if any registry entry uses this model.
         skip_strip = False
         if self.cfg:
-            # We check if validator_model matches any key or resolved name
-            reg_key = "raven_primary" # Default for Raven
+            reg_key = "raven_primary" 
             skip_strip = self.cfg.get_registry_flag(reg_key, "thinking", False)
         
         raw_output = self.llm.generate(
@@ -87,20 +55,48 @@ class Raven:
             prompt=prompt,
             options=options,
             system=RAVEN_SYSTEM_PROMPT,
-            keep_alive=0,
+            keep_alive="5m",
             skip_strip_thinking=skip_strip
         )
         
-        # Cleanup potential markdown ticks if the model ignores the prompt
-        cleaned = raw_output.replace("```json", "").replace("```", "").strip()
+        # Reconstruct the forced start
+        prefix = '{\n  "goal": "'
+        raw_stripped = raw_output.replace("```json", "").replace("```", "").strip()
+        
+        if raw_stripped.startswith(prefix):
+            cleaned = raw_stripped
+        elif raw_stripped.startswith('{\n'): # Partial repeat
+             cleaned = raw_stripped
+        elif raw_stripped.startswith('{'): # Total repeat
+             cleaned = raw_stripped
+        else:
+            cleaned = prefix + raw_stripped
         
         try:
             data = json.loads(cleaned)
-            tasks = [
-                TreeTask(**t) for t in data.get("tasks", [])
-            ]
+            tasks = []
+            for t in data.get("tasks", []):
+                # Mapping potentially old keys to new schema for robustness
+                task_data = {
+                    "id": t.get("id"),
+                    "task": t.get("task") or t.get("description"),
+                    "files": t.get("files") or t.get("target_files"),
+                    "symbols": t.get("symbols", "*"),
+                    "intent": t.get("intent", "Feature"),
+                    "complexity": t.get("complexity", 2),
+                    "tools": t.get("tools", []),
+                    "potential_pitfalls": t.get("potential_pitfalls"),
+                    "constraints": t.get("constraints")
+                }
+                tasks.append(TreeTask(**task_data))
+            
             plan = ForestPlan(goal=data.get("goal", "Unknown Goal"), tasks=tasks)
-            print(f"[🦅 Raven] Plan created with {len(plan.tasks)} tasks.")
+            
+            # Applying Plan Optimization: Filtering and Merging
+            plan = filter_raven_plan(plan)
+            plan = merge_similar_tasks(plan)
+            
+            print(f"[🦅 Raven] Modular Plan created with {len(plan.tasks)} tasks.")
             return plan
         except json.JSONDecodeError as e:
             print(f"[!] Raven failed to generate valid JSON: {e}\nRaw output: {raw_output}")
@@ -109,9 +105,9 @@ class Raven:
                 goal="Fallback Plan",
                 tasks=[TreeTask(
                     id="fallback_1", 
-                    description=request_text, 
-                    intent="Feature", 
-                    keywords="main logic", 
-                    target_files="*"
+                    task=request_text, 
+                    files="*",
+                    symbols="*",
+                    intent="Feature"
                 )]
             )

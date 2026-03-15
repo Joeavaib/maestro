@@ -7,57 +7,70 @@ from dataclasses import dataclass
 class Artifact:
     kind: str
     payload: str
+    rationale: str = ""
 
 def parse_artifact(output: str) -> Artifact:
+    """
+    Surgically extracts code artifacts (Diffs or FILE blocks) from LLM responses.
+    Handles markdown fences, XML tags, and conversational noise.
+    """
+    # 1. Extract Rationale (if present in XML tags)
+    rationale_match = re.search(r"<rationale>(.*?)</rationale>", output, re.DOTALL | re.IGNORECASE)
+    rationale = rationale_match.group(1).strip() if rationale_match else ""
+    
+    # Clean the output for easier parsing
     t = output.strip()
     
-    # 1. Extract ALL fenced code blocks first (Ignore all conversational text outside!)
-    blocks = re.findall(r"```(?:[a-zA-Z0-9_+-]+)?\n(.*?)\n```", t, re.DOTALL)
+    # 2. Resilient Diff Search
+    # Look for diff blocks anywhere, inside or outside fences
+    diff_patterns = [
+        r"```(?:diff)?\n(diff --git.*?)\n```",
+        r"```(?:diff)?\n(--- a/.*?)\n```",
+        r"(diff --git .*?)(?=\n\n|\nFILE:|\n<|$)",
+        r"(--- a/.*?)(?=\n\n|\nFILE:|\n<|$)"
+    ]
     
-    if blocks:
-        diff_payload = []
-        file_payload = []
+    for pattern in diff_patterns:
+        match = re.search(pattern, t, re.DOTALL)
+        if match:
+            return Artifact("diff", match.group(1).strip(), rationale)
+
+    # 3. Resilient FILE Block Search
+    # Matches "FILE: path/to/file\nCONTENT" or similar variants
+    # Also handles variants like "# FILE: path", "// FILE: path", etc.
+    file_blocks = []
+    
+    # First, look inside markdown fences for FILE markers
+    fenced_blocks = re.findall(r"```(?:[a-zA-Z0-9_+-]+)?\n(.*?)\n```", t, re.DOTALL)
+    for block in fenced_blocks:
+        b = block.strip()
+        file_match = re.search(r"^(?:[+#/\[<* \t]*)(?:FILE|file|File)[\s:]+([^\n\s>\]]+)", b, re.IGNORECASE)
+        if file_match:
+            path = file_match.group(1).strip()
+            content = b.split('\n', 1)[-1] if '\n' in b else ""
+            file_blocks.append(f"FILE: {path}\n{content}")
+        else:
+            # If a fence is present but no FILE marker, we assume it's the target file
+            file_blocks.append(f"FILE: TARGET_FILE_PLACEHOLDER\n{b}")
+
+    if file_blocks:
+        return Artifact("file_blocks", "\n\n".join(file_blocks), rationale)
+
+    # Final fallback: Look for "FILE:" markers in the raw text
+    raw_file_matches = re.finditer(r"(?:^|\n)(?:\+|-|#|\[|<)*\s*(?:FILE|file|File)[:\s]+([^\n\s>\]]+)", t, re.IGNORECASE)
+    last_pos = -1
+    last_path = None
+    
+    for match in raw_file_matches:
+        if last_path:
+            content = t[last_pos:match.start()].strip()
+            file_blocks.append(f"FILE: {last_path}\n{content}")
+        last_path = match.group(1).strip()
+        last_pos = match.end()
         
-        for block in blocks:
-            b = block.strip()
-            if not b:
-                continue
-                
-            # Is it a diff?
-            if b.startswith("diff --git") or b.startswith("--- ") or b.startswith("@@ -"):
-                diff_payload.append(b)
-            else:
-                # Does it have a FILE header inside the block?
-                # Matches: FILE: path, // FILE: path, # File: path, etc.
-                file_match = re.search(r"^(?:[+#/\[<* \t]*)(?:FILE|file|File)[\s:]+([^\n\s>\]]+)", b, re.IGNORECASE)
-                
-                if file_match:
-                    path = file_match.group(1).strip()
-                    # Strip the first line (the header) to get the clean code
-                    content = b.split('\n', 1)[-1] if '\n' in b else ""
-                    file_payload.append(f"FILE: {path}\n{content}")
-                else:
-                    # It's just generic code, give it a placeholder
-                    file_payload.append(f"FILE: TARGET_FILE_PLACEHOLDER\n{b}")
-        
-        if diff_payload:
-            return Artifact("diff", "\n\n".join(diff_payload))
-        if file_payload:
-            return Artifact("file_blocks", "\n\n".join(file_payload))
+    if last_path:
+        content = t[last_pos:].split("</", 1)[0].strip() # Stop at XML closing tags
+        file_blocks.append(f"FILE: {last_path}\n{content}")
+        return Artifact("file_blocks", "\n\n".join(file_blocks), rationale)
 
-    # 2. Fallback (If the model completely forgot markdown fences)
-    if t.startswith("diff --git") or t.startswith("--- ") or t.startswith("@@ -"):
-        return Artifact("diff", t)
-
-    # Search for FILE markers anywhere (Legacy fallback)
-    file_match = re.search(r"(?:^|\n)(?:\+|-|#|\[|<)*\s*(?:FILE|file|File)[:\s]+([^\n\s]+)", t, re.IGNORECASE)
-    if file_match:
-        start_pos = file_match.start()
-        sub = t[start_pos:].strip()
-        sub = re.sub(r"^(?:\+|-|#|\[|<)*\s*(?:FILE|file|File)[:\s]*", "FILE: ", sub)
-        sub = re.sub(r"<\s*/\s*(?:FILE|file|File)\s*>", "", sub)
-        lines = sub.split("\n")
-        lines[0] = re.sub(r"[\]>]", "", lines[0]).strip()
-        return Artifact("file_blocks", "\n".join(lines))
-
-    return Artifact("invalid", output)
+    return Artifact("invalid", output, rationale)
