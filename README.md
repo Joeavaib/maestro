@@ -58,7 +58,7 @@ cd ../..
 The easiest way to use Maestro is through the integrated dashboard:
 
 ```bash
-./start_maestro_ui.sh
+./mystic/start_maestro_ui.sh
 ```
 -   **Frontend:** [http://localhost:5173](http://localhost:5173)
 -   **Backend API:** [http://localhost:8000](http://localhost:8000)
@@ -69,7 +69,7 @@ For direct command-line control:
 
 ```bash
 # Run a new task
-python -m maestro.cli run --repo ./your-project --request "Add unit tests for auth.py" --cfg cfg.json --forest
+python -m maestro.cli run --repo ./your-project --request "Add unit tests for auth.py" --cfg mystic/cfg.json --forest
 
 # Preview the changes in the sandbox
 python -m maestro.cli preview --cmd "pytest"
@@ -82,7 +82,7 @@ python -m maestro.cli accept
 
 ## ⚙️ Configuration
 
--   **`cfg.json`:** Defines the LLM backends (Ollama/vLLM) and models used for planning and execution.
+-   **`mystic/cfg.json`:** Defines the LLM backends (Ollama/vLLM) and models used for planning and execution.
 -   **`models/registries.json`:** Maps internal model names to your local provider (HuggingFace, Ollama, etc.).
 
 ---
