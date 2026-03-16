@@ -39,12 +39,9 @@ class Luna:
             
         file_list = [f.strip() for f in files_str.split(",") if f.strip()]
         
-        # If multiple files are targeted, we default to diffs for safety, unless they are all new
+        # If multiple files are targeted, we default to raw files as long as they aren't massive.
         if len(file_list) > 1:
-            all_new = all(not (repo_path / f).exists() for f in file_list)
-            if all_new:
-                return "Format: Rationale block followed exactly by raw file blocks for EACH file (FILE: path/to/file.py\\n<content>)."
-            return "Format: Rationale block followed exactly by unified diff format (--- a/path\\n+++ b/path\\n@@...)."
+            return "Format: Rationale block followed exactly by raw file blocks for EACH file (FILE: path/to/file.py\\n<full file content>). Rewrite the ENTIRE file content for each."
 
         # Single file logic
         f = file_list[0]
@@ -58,13 +55,13 @@ class Luna:
                 lines = file.readlines()
                 line_count = len(lines)
                 
-            # For small files (<150 lines), writing the whole file is much safer for small LLMs than diffs
-            if line_count < 150:
-                return f"Format: Small file detected. You MUST use raw file format. Rewrite the ENTIRE file (FILE: {f}\\n<full new file content>)."
+            # For modern 8k-32k context LLMs, rewriting up to 500 lines is much safer than diffs
+            if line_count < 500:
+                return f"Format: You MUST use raw file format. Rewrite the ENTIRE file (FILE: {f}\\n<full new file content>)."
             else:
-                return f"Format: Large file detected. You MUST use unified diff format to modify specific symbols (--- a/{f}\\n+++ b/{f}\\n@@...)."
+                return f"Format: Large file detected (>500 lines). You MUST use unified diff format to modify specific symbols (--- a/{f}\\n+++ b/{f}\\n@@...)."
         except Exception:
-            return "Format: Rationale block followed exactly by unified diff or raw file format."
+            return "Format: Rationale block followed exactly by raw file format."
 
 
     def execute_plan(self, repo_path: Path, plan: ForestPlan) -> dict:
@@ -197,33 +194,33 @@ class Luna:
                 context_block = harvest_match.group(1).strip() if harvest_match else raw_harvest.strip()
                 context_block = context_block.replace('path="maestro/maestro/', 'path="maestro/')
 
-            # 2. RESCUE CONFIGURATION
-            expert_plan = ""
-            is_rescue = (reg_key == "tree_heavy_worker") or (task.complexity >= 4 and attempt > 0)
-            if is_rescue:
-                planner_model_name = self._resolve_reg_model("tree_heavy_planner")
-                rescue_prompt = (
-                    "[RESCUE CONFIGURATION]\n"
-                    f"TASK: {task.task}\nSYMBOLS: {task.symbols}\n"
-                )
-                if compact_error: rescue_prompt += f"FAILURE: {compact_error}\n"
-                if context_block: rescue_prompt += f"CONTEXT:\n{context_block}\n"
-                rescue_prompt += "\nINSTRUCTION: Provide a surgical, step-by-step strategy to fix this. NO CODE.\nSTRATEGY: "
-                expert_plan = self.llm.generate(
-                    model=planner_model_name, 
-                    prompt=rescue_prompt, 
-                    system="Role: Architect. Task: Draft recovery logic. Format: Numbered list. Plain text instructions. Identify target file and required structural changes.", 
-                    skip_strip_thinking=True
-                )
+            target_files_content = self._read_target_files(repo_path, task.files)
 
-            # 3. PREPARE TREE PROMPT (COMPLETION FORMAT)
+            # 2. MICRO-STRATEGY (Tech Lead Planning)
+            planner_model_name = self._resolve_reg_model("tree_heavy_planner")
+            strategy_prompt = (
+                "[MICRO-STRATEGY PLANNING]\n"
+                f"TASK: {task.task}\n"
+                f"SYMBOLS: {task.symbols}\n"
+            )
+            if target_files_content: strategy_prompt += f"CURRENT TARGET FILES CONTENT:\n{target_files_content}\n\n"
+            if compact_error: strategy_prompt += f"FAILURE: {compact_error}\n"
+            if context_block: strategy_prompt += f"CONTEXT:\n{context_block}\n"
+            
+            strategy_prompt += "\nINSTRUCTION: Provide a surgical, step-by-step strategy to implement this task. Specify exact code changes. NO CODE BLOCKS, plain text instructions only.\nSTRATEGY: "
+            
+            expert_plan = self.llm.generate(
+                model=planner_model_name, 
+                prompt=strategy_prompt, 
+                system="Role: Tech Lead. Task: Draft implementation logic for a Junior Developer. Format: Numbered list. Plain text instructions.", 
+                skip_strip_thinking=True
+            )
+
+            # 3. PREPARE TREE PROMPT (COMPLETION FORMAT - DOER ONLY)
             prompt = ""
             if context_block: prompt += f"[CONTEXT]\n{context_block}\n\n"
-            
-            target_files_content = self._read_target_files(repo_path, task.files)
             if target_files_content: prompt += f"[CURRENT FILE CONTENT]\n{target_files_content}\n\n"
-            
-            if expert_plan: prompt += f"[EXPERT_RESCUE_PLAN]\n{expert_plan}\n\n"
+            if expert_plan: prompt += f"[TECH LEAD STRATEGY]\n{expert_plan}\n\n"
             if compact_error: prompt += f"[PREVIOUS_ERROR]\n{compact_error}\n\n"
             
             constraints = [f"- {task.constraints}"] if task.constraints else []
@@ -234,17 +231,15 @@ class Luna:
                 f"[TASK]\n"
                 f"FILE: {task.files}\n"
                 f"SYMBOLS: {task.symbols}\n"
-                f"INSTRUCTION: {task.task}\n\n"
+                f"INSTRUCTION: Implement the tech lead's strategy exactly as described.\n\n"
                 "[OUTPUT]\n"
-                "<rationale>\n"
             )
             
             # Dynamic system prompt based on file state
             dynamic_format_instruction = self._determine_output_format(repo_path, task.files)
-            system_prompt = f"{TREE_SYSTEM_PROMPT_BASE}\n{dynamic_format_instruction}"
+            system_prompt = f"{TREE_SYSTEM_PROMPT_BASE}\nCRITICAL: You MUST start your response immediately with the <rationale> tag. Do not say 'Here is the code'.\n{dynamic_format_instruction}"
             
-            # Since we end the prompt exactly with `<rationale>\n`, the LLM (in completion mode) 
-            # will naturally continue writing the rationale, preventing chat tags.
+            # Generate the final code patch
             output = self.llm.generate(model=current_model, prompt=prompt, system=system_prompt, skip_strip_thinking=True)
             
             interaction = {"role": "tree", "task_id": task.id, "attempt": attempt, "output": output, "success": False}

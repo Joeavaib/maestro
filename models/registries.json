@@ -1,34 +1,32 @@
 {
   "raven_primary": {
     "backend": "ollama",
-    "model": "hf.co/TeichAI/Qwen3-14B-Claude-4.5-Opus-High-Reasoning-Distill-GGUF:Q4_K_M",
-    "thinking": true
+    "model": "qwen2.5-coder:14b",
+    "thinking": false
   },
   "luna_monitor": {
     "backend": "ollama",
-    "model": "8b-claude-4.5-opus-distill:latest",
+    "model": "qwen2.5-coder:14b",
     "thinking": false
   },
   "tree_light": {
     "backend": "ollama",
-    "model": "DeepSeek-V2_MoE-IQ_XS:latest",
+    "model": "qwen2.5-coder:14b",
     "thinking": false
   },
   "tree_medium": {
     "backend": "ollama",
-    "model": "hf.co/TeichAI/Qwen3-8B-DeepSeek-v3.2-Speciale-Distill-GGUF:Q8_0",
+    "model": "qwen2.5-coder:14b",
     "thinking": false
   },
   "tree_heavy_planner": {
     "backend": "ollama",
-    "model": "phi4-reasoning:14b",
-    "thinking": true,
-    "note": "Planner for heavy tasks/escalations"
+    "model": "qwen2.5-coder:14b",
+    "thinking": false
   },
   "tree_heavy_worker": {
     "backend": "ollama",
-    "model": "hf.co/TeichAI/Qwen3-14B-Claude-4.5-Opus-High-Reasoning-Distill-GGUF:Q4_K_M",
-    "thinking": true,
-    "note": "Worker for heavy tasks"
+    "model": "qwen2.5-coder:14b",
+    "thinking": false
   }
 }
