@@ -257,6 +257,15 @@ class Luna:
             processing_output = cleaned_output if cleaned_output else output
             artifact = parse_artifact(processing_output)
             
+            # Resolve Placeholder Target Files
+            if artifact.kind == "file_blocks" and "TARGET_FILE_PLACEHOLDER" in artifact.payload:
+                target_files_list = [f.strip() for f in task.files.split(",") if f.strip()]
+                if len(target_files_list) == 1 and target_files_list[0] != "*":
+                    artifact.payload = artifact.payload.replace("TARGET_FILE_PLACEHOLDER", target_files_list[0])
+                else:
+                    # If multiple targets or wildcard, we can't reliably resolve the placeholder
+                    artifact.kind = "invalid"
+            
             patch_apply = {"ok": False}
             if artifact.kind == "diff":
                 patch_apply = apply_diff(repo_path, artifact.payload, self.cfg.allow_renames)
