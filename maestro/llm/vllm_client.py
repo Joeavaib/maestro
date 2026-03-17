@@ -85,8 +85,9 @@ class VLLMClient:
                                         if len(words) > 15:
                                             pattern = " ".join(words[-10:])
                                             search_area = response_text[-500:]
-                                            if search_area.count(pattern) >= 2:
+                                            if search_area.count(pattern) >= 3: # Increased from 2 to 3
                                                 sys.stdout.write(f"\n[!] PARAGRAPH LOOP DETECTED! Aborting stream.\n")
+
                                                 sys.stdout.flush()
                                                 loop_detected = True
                                                 break

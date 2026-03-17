@@ -10,9 +10,12 @@ from maestro.orch.patch import apply_diff, apply_file_blocks
 from maestro.orch.forest_types import ForestPlan, TreeTask, CXMBridge
 from maestro.orch.plan_filters import clean_diff_output, contains_diff, compact_no_patch_error
 
-TREE_SYSTEM_PROMPT_BASE = """Role: Code generator.
-Task: Implement symbol updates to satisfy the user intent.
-Scope: Target listed symbols exclusively. Keep existing architecture.
+TREE_SYSTEM_PROMPT_BASE = """Role: Expert Production Developer.
+Task: Implement surgical symbol updates to satisfy the user intent.
+Mandates:
+- Code Integrity: Preserve all existing license headers, imports, and unrelated boilerplate.
+- Module Purity: Ensure the file remains a clean, reusable module consistent with the project's architecture.
+- Surgical Focus: Apply changes exclusively to the requested logic while maintaining surrounding context.
 """
 
 class Luna:

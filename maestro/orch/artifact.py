@@ -22,7 +22,6 @@ def parse_artifact(output: str) -> Artifact:
     t = output.strip()
     
     # 2. Resilient Diff Search
-    # Look for diff blocks anywhere, inside or outside fences
     diff_patterns = [
         r"```(?:diff)?\n(diff --git.*?)\n```",
         r"```(?:diff)?\n(--- a/.*?)\n```",
@@ -36,41 +35,19 @@ def parse_artifact(output: str) -> Artifact:
             return Artifact("diff", match.group(1).strip(), rationale)
 
     # 3. Resilient FILE Block Search
-    # Matches "FILE: path/to/file\nCONTENT" or similar variants
-    # Also handles variants like "# FILE: path", "// FILE: path", etc.
-    file_blocks = []
-    
-    # First, look inside markdown fences for FILE markers
+    # We prefer to return the WHOLE output if it contains "FILE:" markers, 
+    # as apply_file_blocks is now smart enough to filter noise.
+    if re.search(r"(?:^|\n)(?:\+|-|#|\[|<)*\s*(?:FILE|file|File)[:\s]+", t, re.IGNORECASE):
+        # We clean common wrapping tags that might confuse the parser later
+        clean_t = t
+        if "<raw file content>" in clean_t:
+            clean_t = clean_t.replace("<raw file content>", "").replace("</raw file content>", "")
+        return Artifact("file_blocks", clean_t, rationale)
+
+    # Fallback for single fenced blocks without FILE markers
     fenced_blocks = re.findall(r"```(?:[a-zA-Z0-9_+-]+)?\n(.*?)\n```", t, re.DOTALL)
-    for block in fenced_blocks:
-        b = block.strip()
-        file_match = re.search(r"^(?:[+#/\[<* \t]*)(?:FILE|file|File)[\s:]+([^\n\s>\]]+)", b, re.IGNORECASE)
-        if file_match:
-            path = file_match.group(1).strip()
-            content = b.split('\n', 1)[-1] if '\n' in b else ""
-            file_blocks.append(f"FILE: {path}\n{content}")
-        else:
-            # If a fence is present but no FILE marker, we assume it's the target file
-            file_blocks.append(f"FILE: TARGET_FILE_PLACEHOLDER\n{b}")
-
-    if file_blocks:
-        return Artifact("file_blocks", "\n\n".join(file_blocks), rationale)
-
-    # Final fallback: Look for "FILE:" markers in the raw text
-    raw_file_matches = re.finditer(r"(?:^|\n)(?:\+|-|#|\[|<)*\s*(?:FILE|file|File)[:\s]+([^\n\s>\]]+)", t, re.IGNORECASE)
-    last_pos = -1
-    last_path = None
-    
-    for match in raw_file_matches:
-        if last_path:
-            content = t[last_pos:match.start()].strip()
-            file_blocks.append(f"FILE: {last_path}\n{content}")
-        last_path = match.group(1).strip()
-        last_pos = match.end()
-        
-    if last_path:
-        content = t[last_pos:].split("</", 1)[0].strip() # Stop at XML closing tags
-        file_blocks.append(f"FILE: {last_path}\n{content}")
-        return Artifact("file_blocks", "\n\n".join(file_blocks), rationale)
+    if fenced_blocks:
+        # If there's only one block, we assume it's the target file
+        return Artifact("file_blocks", f"FILE: TARGET_FILE_PLACEHOLDER\n{fenced_blocks[0]}", rationale)
 
     return Artifact("invalid", output, rationale)

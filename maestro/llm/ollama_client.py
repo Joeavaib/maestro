@@ -124,8 +124,9 @@ class OllamaClient:
                                 pattern = " ".join(words[-10:])
                                 # Count how many times this exact 10-word phrase appears in the last 500 chars
                                 search_area = response_text[-500:]
-                                if search_area.count(pattern) >= 2: # Reduced from 3 to 2
+                                if search_area.count(pattern) >= 3: # Increased from 2 to 3
                                     sys.stdout.write(f"\n[!] PARAGRAPH LOOP DETECTED! Aborting stream.\n")
+
                                     sys.stdout.flush()
                                     loop_detected = True
                                     break

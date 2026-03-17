@@ -29,13 +29,29 @@ class RunStore:
     def clone_repo_to_work(self, work_repo: Path) -> None:
         if work_repo.exists():
             shutil.rmtree(work_repo)
-        shutil.copytree(self.repo_path, work_repo, ignore=shutil.ignore_patterns(".maestro", ".git"))
+        
+        # We need to copy everything EXCEPT Maestro's own internal folders
+        # to ensure the Tree workers have a clean but complete environment.
+        def ignore_patterns(path, names):
+            return [n for n in names if n in {".maestro", "runs", ".git", "node_modules", "__pycache__"}]
+
+        shutil.copytree(self.repo_path, work_repo, ignore=ignore_patterns, dirs_exist_ok=True, symlinks=True)
         
         import subprocess
         # Initialize a new git repo in the work directory for patch application
         subprocess.run(["git", "init"], cwd=work_repo, capture_output=True)
         subprocess.run(["git", "add", "."], cwd=work_repo, capture_output=True)
         subprocess.run(["git", "commit", "-m", "initial", "--quiet"], cwd=work_repo, capture_output=True)
+
+    @staticmethod
+    def write_json(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+    @staticmethod
+    def write_text(path: Path, payload: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload)
 
 class ShadowStore:
     """
@@ -70,7 +86,8 @@ class ShadowStore:
         shutil.copytree(
             self.main_repo_path, 
             shadow_repo, 
-            ignore=shutil.ignore_patterns(".maestro", ".git", "runs", "__pycache__", "node_modules")
+            ignore=shutil.ignore_patterns(".maestro", ".git", "runs", "__pycache__", "node_modules"),
+            symlinks=True
         )
 
         # 2. Initialize Git in Shadow
@@ -92,14 +109,3 @@ class ShadowStore:
         project_name = self.main_repo_path.name
         shadow_repo = self.shadow_root / project_name
         return shadow_repo
-
-
-    @staticmethod
-    def write_json(path: Path, payload: dict) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
-
-    @staticmethod
-    def write_text(path: Path, payload: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(payload)

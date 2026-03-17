@@ -39,21 +39,27 @@ class SWEBenchProAdapter(BenchmarkAPI):
 
     def setup_environment(self, instance: BenchmarkInstance) -> Path:
         """
-        Uses the swebench harness to setup the Docker environment.
-        For now, we mock the container start but provide the logic.
+        Clones the target repository locally and checks out the base_commit.
+        This allows Maestro to work on the files directly.
         """
-        print(f"[⚙️] Setting up environment for {instance.instance_id}...")
+        print(f"[⚙️] Setting up local repository for {instance.instance_id}...")
         
-        # In a real run, you'd start the container here:
-        # self._container_id = subprocess.check_output([
-        #     "docker", "run", "-d", "-it", 
-        #     instance.metadata["dockerhub_tag"], "/bin/bash"
-        # ]).decode().strip()
+        # Target path for local work
+        work_dir = Path(f"./benchmarks/swe_bench_pro/work/{instance.instance_id}/repo")
+        work_dir.parent.mkdir(parents=True, exist_ok=True)
         
-        # We assume the repo is locally available for Maestro to edit, 
-        # but execution happens via 'docker exec'
-        work_dir = Path(f"./benchmarks/swe_bench_pro/work/{instance.instance_id}")
-        work_dir.mkdir(parents=True, exist_ok=True)
+        # Clone if not exists
+        if not work_dir.exists():
+            repo_url = f"https://github.com/{instance.repo}.git"
+            print(f"[*] Cloning {repo_url}...")
+            subprocess.run(["git", "clone", repo_url, str(work_dir)], check=True, capture_output=True)
+        
+        # Reset and checkout
+        print(f"[*] Checking out base commit {instance.base_commit}...")
+        subprocess.run(["git", "fetch", "origin", instance.base_commit], cwd=work_dir, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", "-f", instance.base_commit], cwd=work_dir, check=True, capture_output=True)
+        subprocess.run(["git", "clean", "-fd"], cwd=work_dir, check=True, capture_output=True)
+        
         return work_dir
 
     def run_in_container(self, cmd: str) -> Dict[str, Any]:
@@ -71,14 +77,28 @@ class SWEBenchProAdapter(BenchmarkAPI):
 
     def evaluate(self, instance: BenchmarkInstance, patch: str) -> Dict[str, Any]:
         """
-        Runs the evaluation suite in the Docker container.
+        Evaluates the generated patch.
+        1. Saves the patch as a predictions file.
+        2. Placeholder for invoking the official swebench evaluation.
         """
-        print(f"[🧪] Running evaluation for {instance.instance_id}...")
-        # Here we would run the official swebench evaluation script INSIDE the container
-        # result = self.run_in_container("python -m swebench.harness.run_evaluation ...")
+        if not patch or patch.strip() == "":
+            print(f"[!] No patch generated for {instance.instance_id}. Skipping evaluation.")
+            return {"resolved": False, "logs": "Empty patch", "patch_applied": False}
+
+        print(f"[🧪] Preparing evaluation for {instance.instance_id}...")
+        
+        # Save patch for parsing/evaluation
+        run_dir = Path(f"./benchmarks/swe_bench_pro/work/{instance.instance_id}")
+        prediction_file = run_dir / "patch.diff"
+        prediction_file.write_text(patch)
+        
+        # Integration with swebench harness would go here:
+        # e.g., subprocess.run(["python", "-m", "swebench.harness.run_evaluation", ...])
+        
+        print(f"[*] Patch saved to {prediction_file} for evaluation.")
         
         return {
-            "resolved": False, 
-            "logs": "Evaluation logs placeholder",
+            "resolved": False, # Actual result would come from parsing evaluation logs
+            "logs": f"Patch saved. Run: python -m swebench.harness.run_evaluation --predictions_path {prediction_file}",
             "patch_applied": True
         }

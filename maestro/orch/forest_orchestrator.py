@@ -9,7 +9,7 @@ from maestro.store import RunStore
 from maestro.orch.raven import Raven
 from maestro.orch.luna import Luna
 from maestro.orch.forest_types import CXMBridge
-from maestro.orch.discovery import discover_checks
+from maestro.orch.discovery import discover_checks, discover_repository_structure
 
 class ForestOrchestrator:
     """
@@ -29,7 +29,10 @@ class ForestOrchestrator:
         run_root, work_repo = run["run_root"], run["work_repo"]
         store.clone_repo_to_work(work_repo)
 
-        # 0. DISCOVERY: Auto-detect checks if none provided
+        # 0. DISCOVERY: Structure and Checks
+        structure = discover_repository_structure(work_repo)
+        print(f"[*] Repository structure discovered for planning context.")
+
         if not self.cfg.checks:
             detected = discover_checks(work_repo)
             if detected:
@@ -44,10 +47,12 @@ class ForestOrchestrator:
         
         luna = Luna(self.cfg, self.llm, cxm_bridge)
         
-        print(f"\\n[🌳 Forest Pipeline] Starting run in {work_repo}")
-        
-        # 1. RAVEN: Strategic Planning
-        plan = raven.plan(request_text)
+        print(f"\n[🌳 Forest Pipeline] Starting run in {work_repo}")
+
+        # 1. RAVEN: Strategic Planning (Inject Structure Context)
+        enriched_request = f"[REPOSITORY STRUCTURE]\n{structure}\n\n[REQUEST]\n{request_text}"
+        plan = raven.plan(enriched_request)
+
         
         # Save the plan for logging/debugging
         import dataclasses, json
@@ -62,29 +67,52 @@ class ForestOrchestrator:
         
         # 3. Finalization
         if result["decision"] == "A":
-            print("[*] Forest Run Successful. Finalizing diff...")
-            diff_res = subprocess.run(
-                ["git", "diff", "--no-index", str(repo), str(work_repo)], capture_output=True
-            )
+            print("[*] Forest Run Successful. Extracting surgical patch...")
+            # We must diff against the VERY FIRST commit in the shadow repo
+            # to capture all changes made across all tasks.
             try:
-                diff = diff_res.stdout.decode('utf-8')
-            except UnicodeDecodeError:
-                diff = diff_res.stdout.decode('latin-1', errors='replace')
+                # Find the hash of the first commit (the one labeled 'initial')
+                initial_commit_res = subprocess.run(
+                    ["git", "rev-list", "--max-parents=0", "HEAD"],
+                    cwd=work_repo, capture_output=True, text=True
+                )
+                initial_commit = initial_commit_res.stdout.strip()
                 
-            store.write_text(run_root / "final" / "final_patch.diff", diff)
+                if not initial_commit:
+                    # Fallback to HEAD if no history (should not happen due to clone_repo_to_work)
+                    initial_commit = "HEAD"
+
+                diff_res = subprocess.run(
+                    ["git", "diff", initial_commit, "HEAD", "--", "."], 
+                    cwd=work_repo, capture_output=True
+                )
+                
+                try:
+                    diff = diff_res.stdout.decode('utf-8')
+                except UnicodeDecodeError:
+                    diff = diff_res.stdout.decode('latin-1', errors='replace')
+                    
+                store.write_text(run_root / "final" / "final_patch.diff", diff)
+                print(f"[✅] Final patch extracted ({len(diff)} bytes)")
+            except Exception as e:
+                print(f"[!] Error during patch extraction: {e}")
             
             # --- Production Readiness: Export clean files ---
             print("[*] Forest Run Successful. Exporting production-ready files...")
             production_dir = run_root / "final" / "production_ready"
-            production_dir.mkdir(parents=True, exist_ok=True)
             
             import shutil
-            def ignore_junk(path, names):
-                return [n for n in names if n in {".git", ".maestro", "__pycache__", ".pytest_cache"}]
+            # Filter out internal Maestro and Git folders during export to avoid recursion
+            def ignore_internal(path, names):
+                return [n for n in names if n in {".git", ".maestro", "runs", "__pycache__", "node_modules", ".pytest_cache"}]
             
             try:
+                if production_dir.exists():
+                    shutil.rmtree(production_dir)
+                production_dir.mkdir(parents=True, exist_ok=True)
+                
                 # Copy everything from work_repo to production_ready dir
-                shutil.copytree(work_repo, production_dir, ignore=ignore_junk, dirs_exist_ok=True)
+                shutil.copytree(work_repo, production_dir, ignore=ignore_internal, dirs_exist_ok=True)
                 print(f"[✅] Production-ready files exported to: {production_dir}")
                 result["production_ready_path"] = str(production_dir)
             except Exception as e:

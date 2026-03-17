@@ -35,46 +35,65 @@ def apply_diff(repo: Path, diff: str, allow_renames: bool = False, focus: str = 
     return {"ok": True}
 
 
-def apply_file_blocks(repo: Path, payload: str) -> dict:
-    import os
-    current = None
-    buf: list[str] = []
-    def flush() -> str | None:
-        nonlocal current, buf
-        if current is None:
-            return None
-            
-        # Strip absolute repo path prefix if the model hallucinates it
-        curr_str = current
-        repo_str = str(repo.resolve())
-        if curr_str.startswith(repo_str):
-            curr_str = curr_str[len(repo_str):].lstrip("/\\")
-            
-        target = (repo / curr_str).resolve()
-        if repo.resolve() not in target.parents and target != repo.resolve():
-            return "path traversal"
-        target.parent.mkdir(parents=True, exist_ok=True)
+import re
 
-        # Strip markdown fences if present
+def apply_file_blocks(repo: Path, payload: str) -> dict:
+    """
+    Applies raw file blocks (FILE: path\ncontent).
+    Surgically ignores conversational noise before the first block.
+    """
+    import os
+    blocks: list[tuple[str, list[str]]] = []
+    current_path = None
+    current_buf = []
+
+    for line in payload.splitlines():
+        # Case-insensitive "FILE: path" match, also handles common comment variants
+        file_match = re.match(r"^(?:[+#/\[<* \t]*)(?:FILE|file|File)[\s:]+([^\n\s>\]]+)", line, re.IGNORECASE)
+        if file_match:
+            if current_path:
+                blocks.append((current_path, current_buf))
+            current_path = file_match.group(1).strip()
+            current_buf = []
+        elif current_path:
+            current_buf.append(line)
+
+    if current_path:
+        blocks.append((current_path, current_buf))
+
+    if not blocks:
+        return {"ok": False, "error": "No valid FILE blocks found in the output."}
+
+    repo_str = str(repo.resolve())
+
+    for path, buf in blocks:
+        # Strip absolute repo path prefix if the model hallucinates it
+        if path.startswith(repo_str):
+            path = path[len(repo_str):].lstrip("/\\")
+        
+        # Sanitize path
+        target = (repo / path).resolve()
+        if repo.resolve() not in target.parents and target != repo.resolve():
+            return {"ok": False, "error": f"Path traversal detected: {path}"}
+
+        # Surgical cleaning of the buffer
         clean_buf = []
         for i, line in enumerate(buf):
-            if line.startswith("```"):
+            # Strip markdown fences and wrapping tags if they appear at start/end of content
+            stripped = line.strip()
+            if stripped.startswith("```") or stripped.endswith("```"):
+                continue
+            if stripped in ["<raw file content>", "</raw file content>", "</rationale>"]:
                 continue
             clean_buf.append(line)
 
-        target.write_text("\n".join(clean_buf).rstrip("\n") + "\n")
-        return None
+        # Final trimming of leading/trailing whitespace in the file content
+        content = "\n".join(clean_buf).strip() + "\n"
+        
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        except Exception as e:
+            return {"ok": False, "error": f"Failed to write to {path}: {str(e)}"}
 
-    for line in payload.splitlines():
-        if line.startswith("FILE: "):
-            err = flush()
-            if err:
-                return {"ok": False, "error": err}
-            current = line[6:].strip()
-            buf = []
-        else:
-            buf.append(line)
-    err = flush()
-    if err:
-        return {"ok": False, "error": err}
-    return {"ok": current is not None}
+    return {"ok": True}
