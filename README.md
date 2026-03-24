@@ -1,5 +1,5 @@
 # 🎼 Maestro: AI Orchestration Framework (Forest v2)
-
+For further Info on how this Project has evolved, read Vision.md
 [![Maestro](https://img.shields.io/badge/Maestro-Forest%20v2-blueviolet?style=for-the-badge&logo=openai)](https://github.com/Joeavaib/maestro)
 [![Local-First](https://img.shields.io/badge/Local--First-Ollama%20%7C%20vLLM-green?style=for-the-badge)](https://ollama.ai)
 
